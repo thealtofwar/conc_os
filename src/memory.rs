@@ -1,7 +1,7 @@
 use bootloader::BootInfo;
 use spin::{Mutex, Once};
 use x86_64::{
-    PhysAddr, VirtAddr,
+    VirtAddr,
     structures::paging::{OffsetPageTable, PageTable},
 };
 

@@ -1,9 +1,6 @@
 use bootloader::{
     BootInfo,
-    bootinfo::{
-        FrameRange,
-        MemoryRegionType::{self, Usable},
-    },
+    bootinfo::MemoryRegionType::{self},
 };
 use spin::{Mutex, Once};
 use x86_64::{PhysAddr, VirtAddr};
@@ -27,9 +24,9 @@ impl PhysicalPageAllocator {
             .max()
             .unwrap() as usize;
 
-        let num_frames = (max_phys + PAGE_SIZE - 1) / PAGE_SIZE;
-        let bitmap_bytes = (num_frames + 7) / 8;
-        let bitmap_pages = (bitmap_bytes + PAGE_SIZE - 1) / PAGE_SIZE;
+        let num_frames = max_phys.div_ceil(PAGE_SIZE);
+        let bitmap_bytes = num_frames.div_ceil(8);
+        let bitmap_pages = bitmap_bytes.div_ceil(PAGE_SIZE);
 
         // Find a usable region large enough to hold the bitmap.
         let region = boot_info

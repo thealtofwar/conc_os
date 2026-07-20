@@ -14,11 +14,10 @@ pub mod vga;
 use bootloader::{BootInfo, entry_point};
 use core::panic::PanicInfo;
 use spin::Mutex;
-use x86_64::{VirtAddr, structures::paging::Translate};
 
 use crate::{
     alloc::ppa::{PMM, PhysicalPageAllocator},
-    memory::{MAPPER, OFFSET, active_level_4_table},
+    memory::{MAPPER, OFFSET},
     serial::{TTYErr, readline},
 };
 

@@ -85,7 +85,7 @@ impl Writer {
     pub fn new(color_code: ColorCode) -> Writer {
         Writer {
             position: ScreenPos::new(0, 0),
-            color_code: color_code,
+            color_code,
             buffer: unsafe { &mut *(0xb8000 as *mut VGABuffer) },
         }
     }

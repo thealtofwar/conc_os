@@ -27,7 +27,7 @@ pub enum TTYErr {
 }
 
 impl From<core::fmt::Error> for TTYErr {
-    fn from(value: core::fmt::Error) -> Self {
+    fn from(_value: core::fmt::Error) -> Self {
         Self::SerialErr
     }
 }
@@ -51,13 +51,12 @@ pub fn readline(buffer: &mut [u8]) -> Result<usize, TTYErr> {
             }
 
             // Handle Backspace (ASCII 8 or ASCII 127/Delete)
-            8 | 127 => {
-                if count > 0 {
+            8 | 127
+                if count > 0 => {
                     count -= 1;
                     // Erase character from terminal: Move left, print space, move left again
                     print(format_args!("{}{}{}", 8 as char, ' ', 8 as char));
                 }
-            }
 
             // Handle standard printable ASCII characters
             32..=126 => {

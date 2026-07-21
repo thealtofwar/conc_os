@@ -8,7 +8,9 @@ pub mod gdt;
 pub mod interrupts;
 pub mod memory;
 pub mod network;
+pub mod pci;
 pub mod serial;
+pub mod virtio;
 pub mod vga;
 
 use bootloader::{BootInfo, entry_point};
@@ -16,9 +18,7 @@ use core::panic::PanicInfo;
 use spin::Mutex;
 
 use crate::{
-    alloc::ppa::{PMM, PhysicalPageAllocator},
-    memory::{MAPPER, OFFSET},
-    serial::{TTYErr, readline},
+    alloc::ppa::{PMM, PhysicalPageAllocator}, memory::{MAPPER, OFFSET}, network::init_virtio_net_pci, serial::{TTYErr, readline},
 };
 
 #[panic_handler]
@@ -36,7 +36,9 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
     PMM.call_once(|| Mutex::new(PhysicalPageAllocator::new(boot_info)));
     OFFSET.call_once(|| boot_info.physical_memory_offset);
 
+    init_virtio_net_pci();
     println!("VGA!");
+    
 
     loop {
         serial::print(format_args!("> "));

@@ -21,6 +21,9 @@ virtio-drivers = { version = "0.13.0", default-features = false }
 version = "1.0"
 features = ["spin_no_std"]
 
+[package.metadata.bootimage]
+run-command = ["qemu-system-x86_64", "-drive", "format=raw,file={}", "-device", "virtio-net-pci,netdev=net0", "-netdev", "user,id=net0"]
+
 [[bin]]
 name = "conc_os"
 test = false

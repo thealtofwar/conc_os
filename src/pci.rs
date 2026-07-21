@@ -1,10 +1,7 @@
-use spin::{Mutex, Once};
-use virtio_drivers::transport::pci::bus::{ConfigurationAccess, DeviceFunction, PciRoot};
-use virtio_drivers::transport::pci::{PciTransport, VIRTIO_VENDOR_ID};
-use virtio_drivers::transport::{DeviceType, Transport};
+use virtio_drivers::transport::pci::bus::{ConfigurationAccess, DeviceFunction};
 use x86_64::instructions::port::Port;
 
-use crate::{virtio::KernelHal, println};
+use crate::println;
 
 
 pub fn pci_config_address(bus: u8, device: u8, function: u8, offset: u8) -> u32 {

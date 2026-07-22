@@ -30,6 +30,8 @@ use crate::{
     apic::init_apic,
     memory::{MAPPER, OFFSET},
     network::{VIRTIO_NET, init_virtio_net_pci},
+    serial::{TTYErr, readline},
+    task::{Task, executor::Executor, serial::SerialStream},
 };
 
 #[panic_handler]
@@ -64,7 +66,24 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
             .lock()
             .mac_address()
     );
+
+    let mut executor = Executor::new();
+    executor.spawn(Task::new(handle_serial()));
+    executor.run();
+}
+
+async fn handle_serial() {
+    let mut stream = SerialStream::new();
     loop {
-        x86_64::instructions::hlt();
+        serial::print(format_args!("> "));
+        let mut buffer = [0u8; 1024];
+        match readline(&mut stream, &mut buffer).await {
+            Ok(count) => match str::from_utf8(&buffer[0..count]) {
+                Ok(s) => serial::print(format_args!("{}\n", s)),
+                Err(_) => serial::print(format_args!("line was not utf8")),
+            },
+            Err(TTYErr::BufferTooSmall) => serial::print(format_args!("line too long")),
+            Err(TTYErr::SerialErr) => serial::print(format_args!("serial err")),
+        }
     }
 }

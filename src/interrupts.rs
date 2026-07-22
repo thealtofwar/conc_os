@@ -1,6 +1,6 @@
 use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame, PageFaultErrorCode};
 
-use crate::{println, serial::SERIAL_TTY};
+use crate::{println, serial::SERIAL_TTY, task::serial};
 use lazy_static::lazy_static;
 
 extern "x86-interrupt" fn breakpoint_handler(stack_frame: InterruptStackFrame) {
@@ -39,7 +39,7 @@ extern "x86-interrupt" fn gp_fault_handler(frame: InterruptStackFrame, error_cod
 
 extern "x86-interrupt" fn com1_interrupt_handler(_stack_frame: InterruptStackFrame) {
     while let Ok(b) = SERIAL_TTY.lock().inner_mut().try_receive_byte() {
-        println!("got byte {}", str::from_utf8(&[b]).unwrap_or("non unicode"));
+        serial::add_byte(b);
     }
 
     if let Some(lapic_mutex) = crate::apic::LAPIC.r#try() {

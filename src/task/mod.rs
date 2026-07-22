@@ -3,6 +3,7 @@ pub mod serial;
 use core::{
     pin::Pin,
     sync::atomic::{AtomicU64, Ordering},
+    task::{Context, Poll},
 };
 
 use alloc::boxed::Box;
@@ -28,5 +29,9 @@ impl Task {
             id: TaskId::new(), // new
             future: Box::pin(future),
         }
+    }
+
+    fn poll(&mut self, context: &mut Context) -> Poll<()> {
+        self.future.as_mut().poll(context)
     }
 }

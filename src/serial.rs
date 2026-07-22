@@ -1,8 +1,9 @@
 use core::fmt::{self, Write};
+use futures_util::StreamExt;
 use lazy_static::lazy_static; // Or spin::Lazy
 use uart_16550::{Config, Uart16550Tty, backend::PioBackend};
 
-use crate::mutex::InterruptMutex;
+use crate::{mutex::InterruptMutex, task::serial::SerialStream};
 
 lazy_static! {
     /// Global interface for the kernel's serial terminal
@@ -33,15 +34,12 @@ impl From<core::fmt::Error> for TTYErr {
     }
 }
 
-pub fn readline(buffer: &mut [u8]) -> Result<usize, TTYErr> {
+pub async fn readline(stream: &mut SerialStream, buffer: &mut [u8]) -> Result<usize, TTYErr> {
     let mut count = 0;
 
     loop {
         // 1. Poll for an incoming byte
-        let byte = match SERIAL_TTY.lock().inner_mut().try_receive_byte() {
-            Ok(b) => b,
-            Err(_) => continue, // Keep polling if nothing is ready
-        };
+        let byte = stream.next().await.ok_or(TTYErr::SerialErr)?;
 
         match byte {
             // Handle Enter key (Line Feed or Carriage Return depending on host terminal)

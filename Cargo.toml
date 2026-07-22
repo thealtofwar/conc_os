@@ -24,6 +24,7 @@ raw-cpuid = "11.6.0"
 acpi = "6"
 pic8259 = "0.11.0"
 x2apic = "0.5.0"
+futures-util = { version = "0.3.4", default-features = false, features = ["alloc"]}
 
 [package.metadata.bootimage]
 run-command = ["qemu-system-x86_64", "-accel", "whpx,kernel-irqchip=off", "-cpu", "Haswell", "-drive", "format=raw,file={}", "-device", "virtio-net-pci,netdev=net0", "-netdev", "user,id=net0"]

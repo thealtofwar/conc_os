@@ -38,8 +38,7 @@ unsafe impl Hal for KernelHal {
     }
 
     unsafe fn mmio_phys_to_virt(paddr: PhysAddr, _size: usize) -> NonNull<u8> {
-        NonNull::new((OFFSET.r#try().expect("offset must be initialized") + paddr) as *mut u8)
-            .unwrap()
+        NonNull::new((get_offset() + paddr) as *mut u8).unwrap()
     }
 
     unsafe fn share(

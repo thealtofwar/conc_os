@@ -2,6 +2,7 @@
 #![no_main]
 #![feature(abi_x86_interrupt)]
 
+pub mod acpi_handling;
 pub mod allocation;
 pub mod apic;
 pub mod constants;
@@ -21,8 +22,10 @@ extern crate alloc;
 use bootloader::{BootInfo, entry_point};
 use core::panic::PanicInfo;
 use spin::Mutex;
+use virtio_drivers::device::net::TxBuffer;
 
 use crate::{
+    acpi_handling::init_acpi,
     allocation::{
         allocator::init_heap,
         ppa::{PMM, PhysicalPageAllocator},
@@ -49,9 +52,10 @@ fn init(boot_info: &'static BootInfo) {
     PMM.call_once(|| Mutex::new(PhysicalPageAllocator::new(boot_info)));
     OFFSET.call_once(|| boot_info.physical_memory_offset);
     init_heap();
-    init_virtio_net_pci();
+    init_acpi();
     lazy_static::initialize(&crate::serial::SERIAL_TTY);
     init_apic();
+    init_virtio_net_pci();
     x86_64::instructions::interrupts::enable();
 }
 
@@ -66,6 +70,28 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
             .lock()
             .mac_address()
     );
+
+    {
+        let mut driver = VIRTIO_NET
+            .r#try()
+            .expect("VIRTIO_NET should be init")
+            .lock();
+        let mut frame = [0u8; 60];
+
+        // Destination: broadcast
+        frame[0..6].copy_from_slice(&[0xff; 6]);
+
+        // Source: our MAC
+        frame[6..12].copy_from_slice(&driver.mac_address());
+
+        // EtherType: IPv4
+        frame[12] = 0x08;
+        frame[13] = 0x00;
+
+        // Remaining bytes are zero padding.
+
+        driver.send(TxBuffer::from(&frame)).expect("ok?");
+    }
 
     let mut executor = Executor::new();
     executor.spawn(Task::new(handle_serial()));

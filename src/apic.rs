@@ -1,7 +1,11 @@
-use crate::{memory::get_offset, println};
+use crate::{
+    acpi_handling::{get_io_apics, isa_irq_to_gsi},
+    memory::get_offset,
+    println,
+};
 use pic8259::ChainedPics;
 use spin::{Mutex, Once};
-use x2apic::ioapic::{IoApic, RedirectionTableEntry};
+use x2apic::ioapic::{IoApic, IrqFlags, RedirectionTableEntry};
 use x86_64::registers::model_specific::Msr;
 
 const IA32_APIC_BASE_MSR: u32 = 0x1B;
@@ -39,6 +43,13 @@ impl PureXapic {
         // Writing 0 signals the end of the interrupt
         unsafe { core::ptr::write_volatile(eoi_ptr, 0) };
     }
+
+    pub unsafe fn lapic_id(&self) -> u8 {
+        unsafe {
+            let id_reg = (self.base_addr + 0x20) as *const u32;
+            ((*id_reg >> 24) & 0xff) as u8
+        }
+    }
 }
 
 // It's safe to send across threads if we wrap it in a Mutex globally
@@ -62,22 +73,62 @@ pub fn init_apic() {
 
     unsafe {
         lapic.enable();
+        println!("{}", lapic.lapic_id())
     } // Direct MMIO write, no MSRs!
 
     LAPIC.call_once(|| Mutex::new(lapic));
 
-    let ioapic_addr = 0xFEC0_0000 + get_offset();
+    let io_apic_info = get_io_apics().first().expect("must have an I/O apic");
+
+    let ioapic_addr = io_apic_info.phys_addr as u64 + get_offset();
 
     unsafe {
         let mut ioapic = IoApic::new(ioapic_addr);
-        ioapic.init(32); // Base offset for interrupts
+        ioapic.init(32);
+    }
+
+    let gsi = isa_irq_to_gsi(4) as u8;
+    route_interrupt(gsi, 36);
+}
+
+pub fn route_pci_interrupt(gsi: u8, vector: u8) {
+    let io_apic_info = get_io_apics().first().expect("must have an I/O apic");
+
+    let ioapic_addr = io_apic_info.phys_addr as u64 + get_offset();
+
+    unsafe {
+        let mut ioapic = IoApic::new(ioapic_addr);
 
         let mut rte = RedirectionTableEntry::default();
 
-        rte.set_vector(36);
+        rte.set_vector(vector);
+        rte.set_dest(0);
+        rte.set_flags(IrqFlags::LEVEL_TRIGGERED | IrqFlags::LOW_ACTIVE);
 
+        let index = gsi - io_apic_info.gsi_base as u8;
         // Route IRQ 4 to vector 36, targeting CPU core 0
-        ioapic.set_table_entry(4, rte);
-        ioapic.enable_irq(4);
+        println!("{:?}", rte);
+        ioapic.set_table_entry(index, rte);
+        ioapic.enable_irq(index);
+    }
+}
+
+pub fn route_interrupt(gsi: u8, vector: u8) {
+    let io_apic_info = get_io_apics().first().expect("must have an I/O apic");
+
+    let ioapic_addr = io_apic_info.phys_addr as u64 + get_offset();
+
+    unsafe {
+        let mut ioapic = IoApic::new(ioapic_addr);
+
+        let mut rte = RedirectionTableEntry::default();
+
+        rte.set_vector(vector);
+        rte.set_dest(0);
+
+        let index = gsi - io_apic_info.gsi_base as u8;
+        // Route IRQ 4 to vector 36, targeting CPU core 0
+        ioapic.set_table_entry(index, rte);
+        ioapic.enable_irq(index);
     }
 }

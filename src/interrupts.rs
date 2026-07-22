@@ -1,7 +1,10 @@
 use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame, PageFaultErrorCode};
 
-use crate::{println, serial::SERIAL_TTY, task::serial};
+use crate::{apic::LAPIC, network::VIRTIO_NET, println, serial::SERIAL_TTY, task::serial};
 use lazy_static::lazy_static;
+
+pub const COM1_VECTOR: u8 = 36;
+pub const VIRTIO_NET_VECTOR: u8 = 0x60;
 
 extern "x86-interrupt" fn breakpoint_handler(stack_frame: InterruptStackFrame) {
     println!("EXCEPTION: BREAKPOINT\n{:#?}", stack_frame);
@@ -49,6 +52,24 @@ extern "x86-interrupt" fn com1_interrupt_handler(_stack_frame: InterruptStackFra
     }
 }
 
+extern "x86-interrupt" fn virtio_irq(_frame: InterruptStackFrame) {
+    println!("VirtIO interrupt!");
+
+    VIRTIO_NET
+        .r#try()
+        .expect("virtio net should be init")
+        .lock()
+        .ack_interrupt();
+
+    unsafe {
+        LAPIC
+            .r#try()
+            .expect("lapic should be init")
+            .lock()
+            .end_of_interrupt()
+    };
+}
+
 lazy_static! {
     static ref IDT: InterruptDescriptorTable = {
         let mut idt = InterruptDescriptorTable::new();
@@ -61,7 +82,8 @@ lazy_static! {
         idt.page_fault.set_handler_fn(page_fault_handler);
         idt.general_protection_fault
             .set_handler_fn(gp_fault_handler);
-        idt[36].set_handler_fn(com1_interrupt_handler);
+        idt[COM1_VECTOR].set_handler_fn(com1_interrupt_handler);
+        idt[VIRTIO_NET_VECTOR].set_handler_fn(virtio_irq);
         idt
     };
 }

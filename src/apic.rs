@@ -1,8 +1,8 @@
 use crate::{memory::get_offset, println};
-use spin::{Mutex, Once};
-use x2apic::{ioapic::{IoApic, IrqFlags, IrqMode, RedirectionTableEntry}, lapic::{LocalApic, LocalApicBuilder}};
-use x86_64::registers::model_specific::Msr;
 use pic8259::ChainedPics;
+use spin::{Mutex, Once};
+use x2apic::ioapic::{IoApic, RedirectionTableEntry};
+use x86_64::registers::model_specific::Msr;
 
 const IA32_APIC_BASE_MSR: u32 = 0x1B;
 // const X2APIC_ENABLE_BIT: u64 = 1 << 10;
@@ -26,7 +26,7 @@ impl PureXapic {
     pub unsafe fn enable(&self) {
         // Spurious Interrupt Vector Register is at offset 0x0F0
         let sivr_ptr = (self.base_addr + 0x0F0) as *mut u32;
-        
+
         // Bit 8 (0x100) is the Software Enable bit.
         // We OR it with our chosen spurious vector (e.g., 255 or 0xFF)
         unsafe { core::ptr::write_volatile(sivr_ptr, 0x100 | 0xFF) };
@@ -35,7 +35,7 @@ impl PureXapic {
     pub unsafe fn end_of_interrupt(&self) {
         // End of Interrupt (EOI) Register is at offset 0x0B0
         let eoi_ptr = (self.base_addr + 0x0B0) as *mut u32;
-        
+
         // Writing 0 signals the end of the interrupt
         unsafe { core::ptr::write_volatile(eoi_ptr, 0) };
     }
@@ -59,9 +59,11 @@ pub fn init_apic() {
 
     let lapic_addr = 0xFEE0_0000 + get_offset();
     let lapic = PureXapic::new(lapic_addr);
-    
-    unsafe { lapic.enable(); } // Direct MMIO write, no MSRs!
-    
+
+    unsafe {
+        lapic.enable();
+    } // Direct MMIO write, no MSRs!
+
     LAPIC.call_once(|| Mutex::new(lapic));
 
     let ioapic_addr = 0xFEC0_0000 + get_offset();
@@ -75,10 +77,7 @@ pub fn init_apic() {
         rte.set_vector(36);
 
         // Route IRQ 4 to vector 36, targeting CPU core 0
-        ioapic.set_table_entry(
-            4,
-            rte
-        );
+        ioapic.set_table_entry(4, rte);
         ioapic.enable_irq(4);
     }
 }

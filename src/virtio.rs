@@ -4,7 +4,8 @@ use virtio_drivers::{Hal, PAGE_SIZE, PhysAddr};
 use x86_64::{VirtAddr, structures::paging::Translate};
 
 use crate::{
-    allocation::ppa::{PMM, PhysicalPageAllocator}, memory::{MAPPER, OFFSET, get_offset},
+    allocation::ppa::{PMM, PhysicalPageAllocator},
+    memory::{MAPPER, OFFSET, get_offset},
 };
 
 pub struct KernelHal;

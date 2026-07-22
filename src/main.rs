@@ -8,13 +8,13 @@ pub mod constants;
 pub mod gdt;
 pub mod interrupts;
 pub mod memory;
+pub mod mutex;
 pub mod network;
 pub mod pci;
 pub mod serial;
 pub mod task;
 pub mod vga;
 pub mod virtio;
-pub mod mutex;
 
 extern crate alloc;
 
@@ -30,7 +30,6 @@ use crate::{
     apic::init_apic,
     memory::{MAPPER, OFFSET},
     network::{VIRTIO_NET, init_virtio_net_pci},
-    serial::{TTYErr, readline},
 };
 
 #[panic_handler]

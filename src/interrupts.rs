@@ -1,4 +1,4 @@
-use x86_64::{instructions::port::PortReadOnly, structures::idt::{InterruptDescriptorTable, InterruptStackFrame, PageFaultErrorCode}};
+use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame, PageFaultErrorCode};
 
 use crate::{println, serial::SERIAL_TTY};
 use lazy_static::lazy_static;

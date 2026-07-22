@@ -1,6 +1,6 @@
 use linked_list_allocator::LockedHeap;
 
-use crate::{allocation::ppa::PMM, memory::{OFFSET, get_offset}};
+use crate::{allocation::ppa::PMM, memory::get_offset};
 
 #[global_allocator]
 static ALLOCATOR: LockedHeap = LockedHeap::empty();

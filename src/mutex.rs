@@ -49,7 +49,7 @@ impl<'a, T> core::ops::DerefMut for InterruptMutexGuard<'a, T> {
 impl<'a, T> Drop for InterruptMutexGuard<'a, T> {
     fn drop(&mut self) {
         // STRICT ORDERING REQUIRED:
-        
+
         // 1. Drop the inner spinlock guard first to release the lock
         unsafe {
             ManuallyDrop::drop(&mut self.inner_guard);

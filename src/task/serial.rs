@@ -7,7 +7,7 @@ static SERIAL_QUEUE: OnceCell<ArrayQueue<u8>> = OnceCell::uninit();
 
 pub(crate) fn add_byte(scancode: u8) {
     if let Ok(queue) = SERIAL_QUEUE.try_get() {
-        if let Err(_) = queue.push(scancode) {
+        if queue.push(scancode).is_err() {
             println!("WARNING: serial queue full; dropping serial input");
         }
     } else {

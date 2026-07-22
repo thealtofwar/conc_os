@@ -17,13 +17,16 @@ spin = "0.5.2"
 uart_16550 = "0.6.0"
 virtio-drivers = { version = "0.13.0", default-features = false }
 linked_list_allocator = "0.10.6"
-
-[dependencies.lazy_static]
-version = "1.0"
-features = ["spin_no_std"]
+lazy_static = { version = "1.0", features = ["spin_no_std"] }
+crossbeam-queue = { version = "0.3.11", default-features = false, features = ["alloc"]}
+conquer-once = { version = "0.2.0", default-features = false}
+raw-cpuid = "11.6.0"
+acpi = "6"
+pic8259 = "0.11.0"
+x2apic = "0.5.0"
 
 [package.metadata.bootimage]
-run-command = ["qemu-system-x86_64", "-drive", "format=raw,file={}", "-device", "virtio-net-pci,netdev=net0", "-netdev", "user,id=net0"]
+run-command = ["qemu-system-x86_64", "-accel", "whpx,kernel-irqchip=off", "-cpu", "Haswell", "-drive", "format=raw,file={}", "-device", "virtio-net-pci,netdev=net0", "-netdev", "user,id=net0"]
 
 [[bin]]
 name = "conc_os"

@@ -1,17 +1,18 @@
 use core::fmt::{self, Write};
 use lazy_static::lazy_static; // Or spin::Lazy
-use spin::Mutex;
 use uart_16550::{Config, Uart16550Tty, backend::PioBackend};
+
+use crate::mutex::InterruptMutex;
 
 lazy_static! {
     /// Global interface for the kernel's serial terminal
-    pub static ref SERIAL_TTY: Mutex<Uart16550Tty<PioBackend>> = {
+    pub static ref SERIAL_TTY: InterruptMutex<Uart16550Tty<PioBackend>> = {
         // Replace with new_mmio if targeting an MMIO architecture
         let tty = unsafe {
             Uart16550Tty::new_port(0x3F8, Config::default())
                 .expect("Failed to init serial TTY")
         };
-        Mutex::new(tty)
+        InterruptMutex::new(tty)
     };
 }
 

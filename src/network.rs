@@ -1,11 +1,24 @@
 use spin::{Mutex, Once};
-use virtio_drivers::{device::net::VirtIONetRaw, transport::{DeviceType, Transport, pci::{PciTransport, VIRTIO_VENDOR_ID, bus::{DeviceFunction, PciRoot}}}};
+use virtio_drivers::{
+    device::net::VirtIONetRaw,
+    transport::{
+        DeviceType, Transport,
+        pci::{
+            PciTransport, VIRTIO_VENDOR_ID,
+            bus::{DeviceFunction, PciRoot},
+        },
+    },
+};
 
-use crate::{pci::{PortCam, pci_read_u32}, println, virtio::KernelHal};
+use crate::{
+    pci::{PortCam, pci_read_u32},
+    println,
+    virtio::KernelHal,
+};
 
 type VirtioNetDriver = VirtIONetRaw<KernelHal, PciTransport, 8>;
 
-static VIRTIO_NET: Once<Mutex<VirtioNetDriver>> = Once::new();
+pub static VIRTIO_NET: Once<Mutex<VirtioNetDriver>> = Once::new();
 
 pub fn init_virtio_net_pci() -> bool {
     if VIRTIO_NET.r#try().is_some() {

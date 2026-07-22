@@ -68,7 +68,7 @@ impl ScreenPos {
 
     pub fn incr_row(&mut self) {
         self.row += 1;
-        if self.col == BUFFER_HEIGHT {
+        if self.row == BUFFER_HEIGHT {
             self.row = 0;
         }
         self.col = 0;

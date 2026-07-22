@@ -4,8 +4,7 @@ use virtio_drivers::{Hal, PAGE_SIZE, PhysAddr};
 use x86_64::{VirtAddr, structures::paging::Translate};
 
 use crate::{
-    alloc::ppa::{PMM, PhysicalPageAllocator},
-    memory::{MAPPER, OFFSET},
+    allocation::ppa::{PMM, PhysicalPageAllocator}, memory::{MAPPER, OFFSET, get_offset},
 };
 
 pub struct KernelHal;
@@ -21,7 +20,7 @@ unsafe impl Hal for KernelHal {
             .alloc_contiguous_pages(pages)
             .expect("allocation failed");
 
-        let ptr = (OFFSET.r#try().expect("offset must be initialized") + addr.as_u64()) as *mut u8;
+        let ptr = (get_offset() + addr.as_u64()) as *mut u8;
 
         unsafe {
             // SAFETY: allocator guarantees pages * PAGE_SIZE bytes to us
@@ -65,4 +64,3 @@ unsafe impl Hal for KernelHal {
     ) {
     }
 }
-

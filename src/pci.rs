@@ -3,7 +3,6 @@ use x86_64::instructions::port::Port;
 
 use crate::println;
 
-
 pub fn pci_config_address(bus: u8, device: u8, function: u8, offset: u8) -> u32 {
     (1 << 31)
         | ((bus as u32) << 16)
@@ -41,14 +40,26 @@ pub struct PortCam;
 
 impl ConfigurationAccess for PortCam {
     fn read_word(&self, device_function: DeviceFunction, register_offset: u8) -> u32 {
-        pci_read_u32(device_function.bus, device_function.device, device_function.function, register_offset)
+        pci_read_u32(
+            device_function.bus,
+            device_function.device,
+            device_function.function,
+            register_offset,
+        )
     }
     fn write_word(&mut self, device_function: DeviceFunction, register_offset: u8, data: u32) {
-        pci_write_u32(device_function.bus, device_function.device, device_function.function, register_offset, data)
+        pci_write_u32(
+            device_function.bus,
+            device_function.device,
+            device_function.function,
+            register_offset,
+            data,
+        )
     }
-    unsafe fn unsafe_clone(&self) -> Self { PortCam }
+    unsafe fn unsafe_clone(&self) -> Self {
+        PortCam
+    }
 }
-
 
 pub fn enumerate_pci() {
     for bus in 0..=255 {
@@ -57,18 +68,12 @@ pub fn enumerate_pci() {
                 let vendor = pci_read_u32(bus, device, function, 0) & 0xffff;
 
                 if vendor != 0xffff {
-                    let device_id =
-                        (pci_read_u32(bus, device, function, 0) >> 16) & 0xffff;
-                    
+                    let device_id = (pci_read_u32(bus, device, function, 0) >> 16) & 0xffff;
+
                     if vendor == 0x1af4 {
                         println!("virtio: ");
                         for bar in 0..6 {
-                            let value = pci_read_u32(
-                                bus,
-                                device,
-                                function,
-                                0x10 + bar * 4,
-                            );
+                            let value = pci_read_u32(bus, device, function, 0x10 + bar * 4);
 
                             println!("BAR{} = {:08x}", bar, value);
                         }

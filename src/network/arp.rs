@@ -12,6 +12,12 @@ pub struct ArpCache {
     entries: BTreeMap<Ipv4Addr, ArpEntry>,
 }
 
+impl Default for ArpCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ArpCache {
     pub fn new() -> Self {
         Self {

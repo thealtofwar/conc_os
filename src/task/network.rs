@@ -10,10 +10,7 @@ use virtio_drivers::device::net::TxBuffer;
 
 use crate::{
     get_net_driver,
-    network::{
-        device::VirtioNetDriver,
-        handler::{EthernetFrame, get_network_interface, init_network_interface},
-    },
+    network::handler::{EthernetFrame, get_network_interface, init_network_interface},
     println,
 };
 
@@ -42,6 +39,12 @@ pub struct NetworkStream {
     _private: (),
 }
 
+impl Default for NetworkStream {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl NetworkStream {
     pub fn new() -> Self {
         NET_EVENTS
@@ -62,7 +65,7 @@ impl Stream for NetworkStream {
             return Poll::Ready(Some(evt));
         }
 
-        NET_WAKER.register(&cx.waker());
+        NET_WAKER.register(cx.waker());
 
         match queue.pop() {
             Some(evt) => {

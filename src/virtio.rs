@@ -5,7 +5,7 @@ use x86_64::{VirtAddr, structures::paging::Translate};
 
 use crate::{
     allocation::ppa::{PMM, PhysicalPageAllocator},
-    memory::{MAPPER, OFFSET, get_offset},
+    memory::{MAPPER, get_offset},
 };
 
 pub struct KernelHal;

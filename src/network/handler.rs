@@ -1,7 +1,6 @@
 use crate::network::arp::{ArpCache, ArpOperation, ArpPacket};
 use crate::{network::device::get_net_driver, println, utils::FromSlice};
 use alloc::vec;
-use alloc::{collections::BTreeMap, vec::Vec};
 use core::{
     fmt::{Display, Formatter},
     net::Ipv4Addr,
@@ -166,11 +165,11 @@ impl<'a> EthernetFrame<'a> {
                 }
 
                 Ok(Self::Arp(ArpPacket {
-                    hardware_type: hardware_type,
-                    protocol_type: protocol_type,
-                    hardware_len: hardware_len,
-                    proto_len: proto_len,
-                    operation: operation,
+                    hardware_type,
+                    protocol_type,
+                    hardware_len,
+                    proto_len,
+                    operation,
                     sender_mac: MacAddress::new(&arp[8..14]),
                     sender_addr: Ipv4Addr::from_octets(
                         *(arp[14..18].as_array().expect("invalid length")),

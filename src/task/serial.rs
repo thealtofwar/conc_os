@@ -28,6 +28,12 @@ pub struct SerialStream {
     _private: (),
 }
 
+impl Default for SerialStream {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SerialStream {
     pub fn new() -> Self {
         SERIAL_QUEUE
@@ -48,7 +54,7 @@ impl Stream for SerialStream {
             return Poll::Ready(Some(byte));
         }
 
-        WAKER.register(&cx.waker());
+        WAKER.register(cx.waker());
 
         match queue.pop() {
             Some(byte) => {

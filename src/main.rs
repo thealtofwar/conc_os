@@ -22,9 +22,7 @@ extern crate alloc;
 
 use bootloader::{BootInfo, entry_point};
 use core::panic::PanicInfo;
-use futures_util::StreamExt;
 use spin::Mutex;
-use virtio_drivers::device::net::TxBuffer;
 
 use crate::{
     acpi_handling::init_acpi,
@@ -36,12 +34,7 @@ use crate::{
     memory::{MAPPER, OFFSET},
     network::device::{get_net_driver, init_virtio_net_pci},
     serial::{TTYErr, readline},
-    task::{
-        Task,
-        executor::Executor,
-        network::{NetworkEvent, NetworkStream, network_task},
-        serial::SerialStream,
-    },
+    task::{Task, executor::Executor, network::network_task, serial::SerialStream},
 };
 
 #[panic_handler]

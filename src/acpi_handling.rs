@@ -2,15 +2,14 @@ use core::ptr::NonNull;
 
 use acpi::{
     AcpiTables, Handler, PhysicalMapping,
-    platform::InterruptModel,
     rsdp::Rsdp,
-    sdt::madt::{self, Madt, MadtEntry},
+    sdt::madt::{self, MadtEntry},
 };
 use alloc::vec::Vec;
 use spin::Once;
 use x86_64::instructions::port::Port;
 
-use crate::{memory::get_offset, println};
+use crate::memory::get_offset;
 
 #[derive(Clone)]
 struct AcpiHandler;
@@ -168,11 +167,11 @@ impl Handler for AcpiHandler {
         unimplemented!("Kernel timer not yet wired to ACPI handler")
     }
 
-    fn stall(&self, microseconds: u64) {
+    fn stall(&self, _microseconds: u64) {
         unimplemented!("Kernel stall not yet wired to ACPI handler")
     }
 
-    fn sleep(&self, milliseconds: u64) {
+    fn sleep(&self, _milliseconds: u64) {
         unimplemented!("Kernel sleep not yet wired to ACPI handler")
     }
 
@@ -180,11 +179,11 @@ impl Handler for AcpiHandler {
         unimplemented!("Kernel mutexes not yet wired to ACPI handler")
     }
 
-    fn acquire(&self, mutex: acpi::Handle, timeout: u16) -> Result<(), acpi::aml::AmlError> {
+    fn acquire(&self, _mutex: acpi::Handle, _timeout: u16) -> Result<(), acpi::aml::AmlError> {
         unimplemented!("Kernel mutexes not yet wired to ACPI handler")
     }
 
-    fn release(&self, mutex: acpi::Handle) {
+    fn release(&self, _mutex: acpi::Handle) {
         unimplemented!("Kernel mutexes not yet wired to ACPI handler")
     }
 }

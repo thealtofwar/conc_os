@@ -12,7 +12,7 @@ use crate::{
     get_net_driver,
     network::{
         device::VirtioNetDriver,
-        handler::{EthernetFrame, handle_packet},
+        handler::{EthernetFrame, get_network_interface, init_network_interface},
     },
     println,
 };
@@ -91,8 +91,10 @@ fn process_rx(packet: &[u8]) {
         src,
         ethertype,
     );
-    let pkt = EthernetFrame::new(packet);
-    handle_packet(&pkt);
+
+    if let Ok(pkt) = EthernetFrame::new(packet) {
+        get_network_interface().lock().handle_packet(&pkt);
+    }
 }
 
 async fn handle_queue_interrupt() {
@@ -108,6 +110,7 @@ async fn handle_queue_interrupt() {
 
 pub async fn network_task() {
     let mut stream = NetworkStream::new();
+    init_network_interface();
     {
         let mut driver = get_net_driver().lock();
 

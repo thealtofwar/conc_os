@@ -8,7 +8,14 @@ use crossbeam_queue::ArrayQueue;
 use futures_util::{Stream, StreamExt, task::AtomicWaker};
 use virtio_drivers::device::net::TxBuffer;
 
-use crate::{get_net_driver, network::device::VirtioNetDriver, println};
+use crate::{
+    get_net_driver,
+    network::{
+        device::VirtioNetDriver,
+        handler::{EthernetFrame, handle_packet},
+    },
+    println,
+};
 
 static NET_EVENTS: OnceCell<ArrayQueue<NetworkEvent>> = OnceCell::uninit();
 static NET_WAKER: AtomicWaker = AtomicWaker::new();
@@ -84,34 +91,8 @@ fn process_rx(packet: &[u8]) {
         src,
         ethertype,
     );
-    match ethertype {
-        0x0806 => {
-            let arp = &packet[14..];
-
-            let opcode = u16::from_be_bytes([arp[6], arp[7]]);
-
-            let sender_mac = &arp[8..14];
-            let sender_ip = &arp[14..18];
-
-            let target_mac = &arp[18..24];
-            let target_ip = &arp[24..28];
-            println!(
-                "ARP op={} sender={:02x?} {}.{}.{}.{} target={:02x?} {}.{}.{}.{}",
-                opcode,
-                sender_mac,
-                sender_ip[0],
-                sender_ip[1],
-                sender_ip[2],
-                sender_ip[3],
-                target_mac,
-                target_ip[0],
-                target_ip[1],
-                target_ip[2],
-                target_ip[3],
-            );
-        }
-        _ => {}
-    }
+    let pkt = EthernetFrame::new(packet);
+    handle_packet(&pkt);
 }
 
 async fn handle_queue_interrupt() {

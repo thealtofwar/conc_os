@@ -19,9 +19,13 @@ use crate::{
     virtio::KernelHal,
 };
 
-type VirtioNetDriver = VirtIONet<KernelHal, PciTransport, 8>;
+pub type VirtioNetDriver = VirtIONet<KernelHal, PciTransport, 8>;
 
-pub static VIRTIO_NET: Once<InterruptMutex<VirtioNetDriver>> = Once::new();
+static VIRTIO_NET: Once<InterruptMutex<VirtioNetDriver>> = Once::new();
+
+pub fn get_net_driver() -> &'static InterruptMutex<VirtioNetDriver> {
+    VIRTIO_NET.r#try().expect("VIRTIO_NET must be initialized")
+}
 
 enum DeviceErr {
     NotNetwork(DeviceType),

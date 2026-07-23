@@ -1,6 +1,16 @@
+use virtio_drivers::transport::InterruptStatus;
 use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame, PageFaultErrorCode};
 
-use crate::{apic::LAPIC, network::VIRTIO_NET, println, serial::SERIAL_TTY, task::serial};
+use crate::{
+    apic::LAPIC,
+    network::device::get_net_driver,
+    println,
+    serial::SERIAL_TTY,
+    task::{
+        network::{NetworkEvent, add_event},
+        serial,
+    },
+};
 use lazy_static::lazy_static;
 
 pub const COM1_VECTOR: u8 = 36;
@@ -55,11 +65,17 @@ extern "x86-interrupt" fn com1_interrupt_handler(_stack_frame: InterruptStackFra
 extern "x86-interrupt" fn virtio_irq(_frame: InterruptStackFrame) {
     println!("VirtIO interrupt!");
 
-    VIRTIO_NET
-        .r#try()
-        .expect("virtio net should be init")
-        .lock()
-        .ack_interrupt();
+    let mut driver = get_net_driver().lock();
+
+    let status = driver.ack_interrupt();
+
+    if status.contains(InterruptStatus::QUEUE_INTERRUPT) {
+        add_event(NetworkEvent::Queue);
+    }
+
+    if status.contains(InterruptStatus::DEVICE_CONFIGURATION_INTERRUPT) {
+        add_event(NetworkEvent::ConfigChange);
+    }
 
     unsafe {
         LAPIC

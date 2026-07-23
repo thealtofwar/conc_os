@@ -21,6 +21,7 @@ extern crate alloc;
 
 use bootloader::{BootInfo, entry_point};
 use core::panic::PanicInfo;
+use futures_util::StreamExt;
 use spin::Mutex;
 use virtio_drivers::device::net::TxBuffer;
 
@@ -32,9 +33,14 @@ use crate::{
     },
     apic::init_apic,
     memory::{MAPPER, OFFSET},
-    network::{VIRTIO_NET, init_virtio_net_pci},
+    network::device::{get_net_driver, init_virtio_net_pci},
     serial::{TTYErr, readline},
-    task::{Task, executor::Executor, serial::SerialStream},
+    task::{
+        Task,
+        executor::Executor,
+        network::{NetworkEvent, NetworkStream, network_task},
+        serial::SerialStream,
+    },
 };
 
 #[panic_handler]
@@ -62,39 +68,11 @@ fn init(boot_info: &'static BootInfo) {
 fn kernel_main(boot_info: &'static BootInfo) -> ! {
     init(boot_info);
     println!("VGA!");
-    println!(
-        "{:?}",
-        VIRTIO_NET
-            .r#try()
-            .expect("VIRTIO_NET initialized")
-            .lock()
-            .mac_address()
-    );
-
-    {
-        let mut driver = VIRTIO_NET
-            .r#try()
-            .expect("VIRTIO_NET should be init")
-            .lock();
-        let mut frame = [0u8; 60];
-
-        // Destination: broadcast
-        frame[0..6].copy_from_slice(&[0xff; 6]);
-
-        // Source: our MAC
-        frame[6..12].copy_from_slice(&driver.mac_address());
-
-        // EtherType: IPv4
-        frame[12] = 0x08;
-        frame[13] = 0x00;
-
-        // Remaining bytes are zero padding.
-
-        driver.send(TxBuffer::from(&frame)).expect("ok?");
-    }
+    println!("{:?}", get_net_driver().lock().mac_address());
 
     let mut executor = Executor::new();
     executor.spawn(Task::new(handle_serial()));
+    executor.spawn(Task::new(network_task()));
     executor.run();
 }
 

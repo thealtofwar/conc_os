@@ -1,4 +1,5 @@
 pub mod executor;
+pub mod network;
 pub mod serial;
 use core::{
     pin::Pin,

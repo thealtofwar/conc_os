@@ -12,7 +12,7 @@ macro_rules! impl_from_slice {
                 }
 
                 fn from_be_slice(slice: &[u8]) -> Self {
-                    Self::from_le_bytes(slice.try_into().expect("Incorrect length"))
+                    Self::from_be_bytes(slice.try_into().expect("Incorrect length"))
                 }
             }
         )*

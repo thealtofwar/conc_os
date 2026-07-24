@@ -83,9 +83,9 @@ impl ArpPacket {
         pkt[5..6].copy_from_slice(&self.proto_len.to_be_bytes());
         pkt[6..8].copy_from_slice(&(self.operation as u16).to_be_bytes());
         pkt[8..14].copy_from_slice(&self.sender_mac.addr);
-        pkt[14..18].copy_from_slice(&self.sender_addr.to_bits().to_be_bytes());
+        pkt[14..18].copy_from_slice(&self.sender_addr.octets());
         pkt[18..24].copy_from_slice(&self.target_mac.addr);
-        pkt[24..28].copy_from_slice(&self.target_addr.to_bits().to_be_bytes());
+        pkt[24..28].copy_from_slice(&self.target_addr.octets());
 
         pkt
     }

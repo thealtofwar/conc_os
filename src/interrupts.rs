@@ -63,7 +63,7 @@ extern "x86-interrupt" fn com1_interrupt_handler(_stack_frame: InterruptStackFra
 }
 
 extern "x86-interrupt" fn virtio_irq(_frame: InterruptStackFrame) {
-    println!("VirtIO interrupt!");
+    // println!("VirtIO interrupt!");
 
     let mut driver = get_net_driver().lock();
 

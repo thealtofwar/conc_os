@@ -4,10 +4,7 @@ use alloc::vec;
 use conc_os_net::arp::{ArpCache, ArpOperation, ArpPacket};
 use conc_os_net::ethernet::{EtherType, EthernetFrame, MacAddress};
 use conc_os_net::ipv4::{IPProtocol, Ipv4Packet, internet_checksum};
-use core::{
-    fmt::{Display, Formatter},
-    net::Ipv4Addr,
-};
+use core::net::Ipv4Addr;
 use spin::{Mutex, Once};
 use virtio_drivers::device::net::TxBuffer;
 

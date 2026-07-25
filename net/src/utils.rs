@@ -20,3 +20,15 @@ macro_rules! impl_from_slice {
 }
 
 impl_from_slice!(u8, u16, u32, u64, i8, i16, i32, i64);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn serializes_correct_endian() {
+        let arr = [123, 231];
+        assert_eq!(u16::from_le_slice(&arr), u16::from_le_bytes(arr));
+        assert_eq!(u16::from_be_slice(&arr), u16::from_be_bytes(arr));
+    }
+}

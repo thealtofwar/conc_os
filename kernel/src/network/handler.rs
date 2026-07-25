@@ -1,8 +1,9 @@
-use crate::network::arp::{ArpCache, ArpOperation, ArpPacket};
-use crate::network::ipv4::{Ipv4Packet, internet_checksum};
-use crate::{network::device::get_net_driver, println, utils::FromSlice};
+use crate::{network::device::get_net_driver, println};
 use alloc::borrow::ToOwned;
 use alloc::vec;
+use conc_os_net::arp::{ArpCache, ArpOperation, ArpPacket};
+use conc_os_net::ethernet::{EtherType, EthernetFrame, MacAddress};
+use conc_os_net::ipv4::{IPProtocol, Ipv4Packet, internet_checksum};
 use core::{
     fmt::{Display, Formatter},
     net::Ipv4Addr,
@@ -28,41 +29,6 @@ pub fn init_network_interface() {
             arp: ArpCache::new(),
         })
     });
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub struct MacAddress {
-    pub addr: [u8; 6],
-}
-
-impl MacAddress {
-    pub fn new(slice: &[u8]) -> Self {
-        MacAddress {
-            addr: *slice.as_array().expect("invalid length"),
-        }
-    }
-
-    pub fn broadcast() -> Self {
-        MacAddress {
-            addr: [255, 255, 255, 255, 255, 255],
-        }
-    }
-}
-
-impl Display for MacAddress {
-    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
-        write!(
-            f,
-            "{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
-            self.addr[0], self.addr[1], self.addr[2], self.addr[3], self.addr[4], self.addr[5]
-        )
-    }
-}
-
-#[repr(u16)]
-pub enum EtherType {
-    IPV4 = 0x0800,
-    ARP = 0x0806,
 }
 
 pub struct NetworkInterface {
@@ -202,10 +168,10 @@ impl NetworkInterface {
         }
 
         match ipv4_packet.protocol {
-            super::ipv4::IPProtocol::ICMP => self.handle_icmp(ipv4_packet),
-            super::ipv4::IPProtocol::TCP => {}
-            super::ipv4::IPProtocol::UDP => {}
-            super::ipv4::IPProtocol::Unknown(_) => {
+            IPProtocol::ICMP => self.handle_icmp(ipv4_packet),
+            IPProtocol::TCP => {}
+            IPProtocol::UDP => {}
+            IPProtocol::Unknown(_) => {
                 println!("unknown ip proto")
             }
         }
@@ -254,56 +220,3 @@ impl NetworkInterface {
     }
 }
 
-pub enum EthernetFrame<'a> {
-    Arp(ArpPacket),
-    Ipv4(Ipv4Packet<'a>),
-    // Ipv6(Ipv6Packet<'a>),
-    /// ethertype, pkt
-    Unknown(u16, &'a [u8]),
-}
-
-impl<'a> EthernetFrame<'a> {
-    pub fn new(packet: &'a [u8]) -> Result<Self, ()> {
-        let ethertype = u16::from_be_bytes([packet[12], packet[13]]);
-        match ethertype {
-            0x0806 => {
-                let arp = &packet[14..];
-
-                let operation = ArpOperation::try_from(u16::from_be_slice(&arp[6..8]))?;
-
-                let hardware_type = u16::from_be_slice(&arp[0..2]);
-                let protocol_type = u16::from_be_slice(&arp[2..4]);
-                let hardware_len = u8::from_be_slice(&arp[4..5]);
-                let proto_len = u8::from_be_slice(&arp[5..6]);
-
-                if hardware_type != 1
-                    || protocol_type != 0x0800
-                    || hardware_len != 6
-                    || proto_len != 4
-                {
-                    println!("rejected because of nonmatch");
-                    // reject malformed packets
-                    return Err(());
-                }
-
-                Ok(Self::Arp(ArpPacket {
-                    hardware_type,
-                    protocol_type,
-                    hardware_len,
-                    proto_len,
-                    operation,
-                    sender_mac: MacAddress::new(&arp[8..14]),
-                    sender_addr: Ipv4Addr::from_octets(
-                        *(arp[14..18].as_array().expect("invalid length")),
-                    ),
-                    target_mac: MacAddress::new(&arp[18..24]),
-                    target_addr: Ipv4Addr::from_octets(
-                        *(arp[24..28].as_array().expect("invalid length")),
-                    ),
-                }))
-            }
-            0x0800 => Ok(Self::Ipv4(Ipv4Packet::new(&packet[14..])?)),
-            _ => Ok(Self::Unknown(ethertype, packet)),
-        }
-    }
-}

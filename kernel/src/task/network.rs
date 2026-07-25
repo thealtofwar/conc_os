@@ -3,13 +3,14 @@ use core::{
     task::{Context, Poll},
 };
 
+use conc_os_net::ethernet::{EthernetFrame, MacAddress};
 use conquer_once::spin::OnceCell;
 use crossbeam_queue::ArrayQueue;
 use futures_util::{Stream, StreamExt, task::AtomicWaker};
 
 use crate::{
     get_net_driver,
-    network::handler::{EthernetFrame, MacAddress, get_network_interface, init_network_interface},
+    network::handler::{get_network_interface, init_network_interface},
     println,
 };
 

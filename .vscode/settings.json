@@ -1,0 +1,8 @@
+{
+    "rust-analyzer.cargo.target": "x86_64-unknown-none",
+    "rust-analyzer.check.target": "x86_64-unknown-none",
+    
+    // Optional but recommended: Stops rust-analyzer from running `cargo check --tests` 
+    // in the background, which can cause std/no_std confusion in the editor.
+    "rust-analyzer.check.allTargets": false
+}

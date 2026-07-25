@@ -14,7 +14,6 @@ pub mod network;
 pub mod pci;
 pub mod serial;
 pub mod task;
-pub mod utils;
 pub mod vga;
 pub mod virtio;
 

@@ -46,7 +46,7 @@ impl ArpCache {
 }
 
 #[repr(u16)]
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ArpOperation {
     Request = 1,
     Reply = 2,
@@ -120,5 +120,26 @@ impl ArpPacket {
                 *(packet_data[24..28].as_array().expect("invalid length")),
             ),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn test_arp_operation_from() {
+        let req: u16 = 1;
+
+        assert_eq!(ArpOperation::try_from(req), Ok(ArpOperation::Request));
+
+        let reply: u16 = 2;
+
+        assert_eq!(ArpOperation::try_from(reply), Ok(ArpOperation::Reply));
+
+        let other = 0;
+        let other2 = 5;
+
+        assert_eq!(ArpOperation::try_from(other), Err(()));
+        assert_eq!(ArpOperation::try_from(other2), Err(()));
     }
 }

@@ -156,6 +156,11 @@ impl NetworkInterface {
     }
 
     pub fn handle_ipv4(&self, ipv4_packet: &Ipv4Packet) {
+        if ipv4_packet.more_fragments || ipv4_packet.frag_offset != 0 {
+            // don't handle fragmented ipv4 packets
+            return;
+        }
+
         let Some(my_ip) = self.ipv4 else {
             return;
         };

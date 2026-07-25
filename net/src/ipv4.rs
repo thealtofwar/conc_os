@@ -5,7 +5,7 @@ use alloc::vec::Vec;
 use crate::utils::FromSlice;
 use core::net::Ipv4Addr;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(u8)]
 pub enum IPProtocol {
     ICMP = 1,
@@ -120,7 +120,7 @@ impl<'a> Ipv4Packet<'a> {
         let dont_fragment = flags & 0b010 != 0;
         let more_fragments = flags & 0b001 != 0;
 
-        if evil_bit || more_fragments || frag_offset != 0 {
+        if evil_bit {
             return Err(());
         }
 
@@ -168,10 +168,10 @@ impl<'a> Ipv4Packet<'a> {
         result.extend_from_slice(&self.length.to_be_bytes());
         result.extend_from_slice(&self.id.to_be_bytes());
 
-        let flags = 0b100
-            + (if self.dont_fragment { 0b010 } else { 0 })
+        let flags = (if self.dont_fragment { 0b010 } else { 0 })
             + if self.more_fragments { 0b001 } else { 0 };
-        let flags_frag_offset = (self.frag_offset + flags) << 13;
+
+        let flags_frag_offset = (self.frag_offset & 0x1fff) + (flags << 13);
         result.extend_from_slice(&flags_frag_offset.to_be_bytes());
 
         result.extend_from_slice(&self.ttl.to_be_bytes());
@@ -192,5 +192,144 @@ impl<'a> Ipv4Packet<'a> {
         result[10..12].copy_from_slice(&checksum);
 
         result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    macro_rules! check_eq {
+        ($data:expr, $result:expr) => {{
+            let data = $data;
+
+            let checksum = internet_checksum(&data);
+
+            assert_eq!(checksum, $result);
+        }};
+    }
+
+    #[test]
+    fn test_internet_checksum() {
+        // some examples taken from https://github.com/google/quiche/blob/main/quiche/common/internet_checksum_test.cc
+
+        check_eq!([0x00, 0x01, 0xf2, 0x03, 0xf4, 0xf5, 0xf6, 0xf7], 0x220d);
+
+        check_eq!(
+            [0x00, 0x01, 0xf2, 0x03, 0xf4, 0xf5, 0xf6, 0xf7, 0x22, 0x0d],
+            0
+        );
+
+        check_eq!([0x00, 0x01, 0xf2, 0x03, 0xf4, 0xf5, 0xf6], 0x2304);
+
+        check_eq!([0xe3, 0x4f, 0x23, 0x96, 0x44, 0x27, 0x99, 0xf3], 0x1aff);
+
+        check_eq!([0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x02, 0x00], 0xfdff);
+
+        check_eq!([], 0xffff);
+    }
+
+    fn get_valid_packet() -> Vec<u8> {
+        vec![
+            0x45, 0x00, 0x00, 0x18, // Version=4, IHL=5, DSCP/ECN=0, Length=24
+            0x12, 0x34, 0x40, 0x00, // ID=0x1234, Flags=DF, FragOffset=0
+            0x40, 0x11, 0x5c, 0xf7, // TTL=64, Protocol=17 (UDP), Checksum=0x5cf7
+            0xc0, 0xa8, 0x01, 0x01, // Src=192.168.1.1
+            0x0a, 0x00, 0x00, 0x01, // Dst=10.0.0.1
+            0xde, 0xad, 0xbe, 0xef, // Data
+        ]
+    }
+
+    #[test]
+    fn test_ipv4_parse_and_serialize() {
+        let packet_data = get_valid_packet();
+        let packet = Ipv4Packet::new(&packet_data).expect("failed to parse valid packet");
+
+        assert_eq!(packet.version_ihl, 0x45);
+        assert_eq!(packet.dscp_ecn, 0x00);
+        assert_eq!(packet.length, 24);
+        assert_eq!(packet.id, 0x1234);
+        assert_eq!(packet.dont_fragment, true);
+        assert_eq!(packet.more_fragments, false);
+        assert_eq!(packet.frag_offset, 0);
+        assert_eq!(packet.ttl, 64);
+        assert_eq!(packet.protocol, IPProtocol::UDP);
+        assert_eq!(packet.checksum, 0x5cf7);
+        assert_eq!(packet.source, Ipv4Addr::new(192, 168, 1, 1));
+        assert_eq!(packet.dest, Ipv4Addr::new(10, 0, 0, 1));
+        assert_eq!(packet.options.len(), 0);
+        assert_eq!(packet.data, &[0xde, 0xad, 0xbe, 0xef]);
+
+        let serialized = packet.serialize();
+        assert_eq!(serialized, packet_data);
+    }
+
+    #[test]
+    fn test_ipv4_with_options() {
+        let packet_data: [u8; 28] = [
+            0x46, 0x00, 0x00, 0x1c, // Version=4, IHL=6, DSCP/ECN=0, Length=28
+            0x12, 0x34, 0x40, 0x00, // ID=0x1234, Flags=DF, Frag=0
+            0x40, 0x11, 0x59, 0xf1, // TTL=64, Protocol=17 (UDP), Checksum=0x59f1
+            0xc0, 0xa8, 0x01, 0x01, // Src=192.168.1.1
+            0x0a, 0x00, 0x00, 0x01, // Dst=10.0.0.1
+            0x01, 0x01, 0x01, 0x01, // Options (4 bytes of NOP)
+            0xde, 0xad, 0xbe, 0xef, // Data
+        ];
+
+        let packet = Ipv4Packet::new(&packet_data).expect("failed to parse packet with options");
+        assert_eq!(packet.options, &[0x01, 0x01, 0x01, 0x01]);
+        assert_eq!(packet.data, &[0xde, 0xad, 0xbe, 0xef]);
+
+        let serialized = packet.serialize();
+        assert_eq!(serialized, packet_data);
+    }
+
+    #[test]
+    fn test_ipv4_fragmented() {
+        let mut data = get_valid_packet();
+        // Modify the flags to set More Fragments (MF=1, DF=0)
+        data[6] = 0x20;
+
+        // Correct header checksum for the modified flags
+        data[10] = 0x7c;
+        data[11] = 0xf7;
+
+        // A compliant IPv4 parser should successfully parse packet fragments.
+        // This will expose the `if evil_bit || more_fragments || frag_offset != 0`
+        // premature rejection in the current implementation.
+        let packet = Ipv4Packet::new(&data).expect("Should parse standard fragmented IPv4 packets");
+
+        assert_eq!(packet.more_fragments, true);
+        assert_eq!(packet.dont_fragment, false);
+        assert_eq!(packet.frag_offset, 0);
+    }
+
+    #[test]
+    fn test_ipv4_invalid_version() {
+        let mut data = get_valid_packet();
+        data[0] = 0x55; // Version 5, IHL 5
+        assert!(Ipv4Packet::new(&data).is_err());
+    }
+
+    #[test]
+    fn test_ipv4_bad_checksum() {
+        let mut data = get_valid_packet();
+        data[11] = 0x00; // Corrupt the checksum
+        assert!(Ipv4Packet::new(&data).is_err());
+    }
+
+    #[test]
+    fn test_ipv4_too_short() {
+        let data = get_valid_packet();
+        let short_data = &data[..15]; // Less than the minimum 20 bytes
+        assert!(Ipv4Packet::new(short_data).is_err());
+    }
+
+    #[test]
+    fn test_ipv4_length_exceeds_buffer() {
+        let mut data = get_valid_packet();
+        data[2] = 0x00;
+        data[3] = 0xFF; // Declared total_length is 255, but buffer is only 24 bytes
+        assert!(Ipv4Packet::new(&data).is_err());
     }
 }

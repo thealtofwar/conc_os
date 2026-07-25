@@ -59,7 +59,7 @@ impl NetworkInterface {
 
         // ---------------- Ethernet ----------------
 
-        // Destination = broadcast
+        // destination
         frame[0..6].copy_from_slice(&dst.addr);
 
         // Source = our MAC

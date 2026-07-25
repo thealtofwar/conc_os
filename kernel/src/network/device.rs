@@ -87,16 +87,6 @@ pub fn init_virtio_net_pci() -> bool {
                         let gsi = (pci_reg & 0xff) as u8;
                         let pin = ((pci_reg >> 8) & 0xff) as u8;
 
-                        let command_status = pci_read_u32(bus, device, function, 0x04);
-
-                        let command = command_status as u16;
-
-                        assert_eq!(command & (1 << 10), 0);
-
-                        if pin == 0 {
-                            panic!("VirtIO device has no interrupt pin");
-                        }
-
                         println!("VirtIO: interrupt line={} pin={}", gsi, pin);
                         route_pci_interrupt(gsi, VIRTIO_NET_VECTOR);
                         return true;

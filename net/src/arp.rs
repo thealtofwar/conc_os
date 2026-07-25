@@ -112,9 +112,13 @@ impl ArpPacket {
             proto_len,
             operation,
             sender_mac: MacAddress::new(&packet_data[8..14]),
-            sender_addr: Ipv4Addr::from_octets(*(packet_data[14..18].as_array().expect("invalid length"))),
+            sender_addr: Ipv4Addr::from_octets(
+                *(packet_data[14..18].as_array().expect("invalid length")),
+            ),
             target_mac: MacAddress::new(&packet_data[18..24]),
-            target_addr: Ipv4Addr::from_octets(*(packet_data[24..28].as_array().expect("invalid length"))),
+            target_addr: Ipv4Addr::from_octets(
+                *(packet_data[24..28].as_array().expect("invalid length")),
+            ),
         })
     }
 }

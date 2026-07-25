@@ -219,4 +219,3 @@ impl NetworkInterface {
         }
     }
 }
-

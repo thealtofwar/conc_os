@@ -94,12 +94,16 @@ impl ArpPacket {
     }
 
     pub fn from_slice(packet_data: &[u8]) -> Result<Self, ()> {
-        let operation = ArpOperation::try_from(u16::from_be_slice(&packet_data[6..8]))?;
+        if packet_data.len() < 28 {
+            return Err(());
+        }
 
         let hardware_type = u16::from_be_slice(&packet_data[0..2]);
         let protocol_type = u16::from_be_slice(&packet_data[2..4]);
         let hardware_len = u8::from_be_slice(&packet_data[4..5]);
         let proto_len = u8::from_be_slice(&packet_data[5..6]);
+
+        let operation = ArpOperation::try_from(u16::from_be_slice(&packet_data[6..8]))?;
 
         if hardware_type != 1 || protocol_type != 0x0800 || hardware_len != 6 || proto_len != 4 {
             // reject malformed packets
@@ -141,5 +145,106 @@ mod tests {
 
         assert_eq!(ArpOperation::try_from(other), Err(()));
         assert_eq!(ArpOperation::try_from(other2), Err(()));
+    }
+
+    // A known-good raw byte array of a standard ARP Request packet
+    // Hardware: Ethernet (1), Protocol: IPv4 (0x0800)
+    const VALID_ARP_REQUEST: [u8; 28] = [
+        0x00, 0x01, // Hardware type: Ethernet (1)
+        0x08, 0x00, // Protocol type: IPv4 (0x0800)
+        0x06, // Hardware size: 6 (MAC)
+        0x04, // Protocol size: 4 (IPv4)
+        0x00, 0x01, // Opcode: Request (1)
+        0x11, 0x22, 0x33, 0x44, 0x55, 0x66, // Sender MAC
+        192, 168, 1, 10, // Sender IP
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Target MAC (zeroed out in request)
+        192, 168, 1, 20, // Target IP
+    ];
+
+    #[test]
+    fn test_arp_serialization() {
+        // Construct the packet using assumed valid structs based on your definitions
+        let packet = ArpPacket {
+            hardware_type: 1,
+            protocol_type: 0x0800,
+            hardware_len: 6,
+            proto_len: 4,
+            operation: ArpOperation::try_from(1).unwrap(), // Assuming Request = 1
+            sender_mac: MacAddress::new(&[0x11, 0x22, 0x33, 0x44, 0x55, 0x66]),
+            sender_addr: Ipv4Addr::from_octets([192, 168, 1, 10]),
+            target_mac: MacAddress::new(&[0x00, 0x00, 0x00, 0x00, 0x00, 0x00]),
+            target_addr: Ipv4Addr::from_octets([192, 168, 1, 20]),
+        };
+
+        assert_eq!(packet.serialize(), VALID_ARP_REQUEST);
+    }
+
+    #[test]
+    fn test_arp_deserialization_success() {
+        let packet =
+            ArpPacket::from_slice(&VALID_ARP_REQUEST).expect("Failed to parse valid ARP packet");
+
+        assert_eq!(packet.hardware_type, 1);
+        assert_eq!(packet.protocol_type, 0x0800);
+        assert_eq!(packet.hardware_len, 6);
+        assert_eq!(packet.proto_len, 4);
+        assert_eq!(packet.sender_mac.addr, [0x11, 0x22, 0x33, 0x44, 0x55, 0x66]);
+        assert_eq!(packet.sender_addr.octets(), [192, 168, 1, 10]);
+        assert_eq!(packet.target_mac.addr, [0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
+        assert_eq!(packet.target_addr.octets(), [192, 168, 1, 20]);
+    }
+
+    #[test]
+    fn test_arp_deserialization_rejects_unsupported_hardware_type() {
+        let mut malformed = VALID_ARP_REQUEST;
+        malformed[1] = 0x02; // Change hardware type to Experimental Ethernet (2)
+
+        assert!(
+            ArpPacket::from_slice(&malformed).is_err(),
+            "Should reject non-Ethernet hardware types"
+        );
+    }
+
+    #[test]
+    fn test_arp_deserialization_rejects_unsupported_protocol() {
+        let mut malformed = VALID_ARP_REQUEST;
+        malformed[2] = 0x86;
+        malformed[3] = 0xDD; // Change protocol type to IPv6 (0x86DD)
+
+        assert!(
+            ArpPacket::from_slice(&malformed).is_err(),
+            "Should reject non-IPv4 protocol types"
+        );
+    }
+
+    #[test]
+    fn test_arp_deserialization_rejects_invalid_lengths() {
+        let mut malformed_hw_len = VALID_ARP_REQUEST;
+        malformed_hw_len[4] = 8; // Invalid MAC length
+        assert!(
+            ArpPacket::from_slice(&malformed_hw_len).is_err(),
+            "Should reject invalid hardware length"
+        );
+
+        let mut malformed_proto_len = VALID_ARP_REQUEST;
+        malformed_proto_len[5] = 6; // Invalid IP length
+        assert!(
+            ArpPacket::from_slice(&malformed_proto_len).is_err(),
+            "Should reject invalid protocol length"
+        );
+    }
+
+    #[test]
+    fn test_arp_deserialization_short_buffer() {
+        // A buffer that is too short for a complete ARP packet (e.g., 20 bytes instead of 28).
+        // This test will FAIL with your current implementation because `from_slice` panics
+        // when indexing `&packet_data[24..28]` instead of gracefully returning an Err(()).
+        let short_buffer = &VALID_ARP_REQUEST[0..20];
+
+        let result = ArpPacket::from_slice(short_buffer);
+        assert!(
+            result.is_err(),
+            "Parsing a short buffer should return an Error, not panic"
+        );
     }
 }

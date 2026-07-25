@@ -23,9 +23,9 @@ impl From<u8> for IPProtocol {
     }
 }
 
-impl Into<u8> for IPProtocol {
-    fn into(self) -> u8 {
-        match self {
+impl From<IPProtocol> for u8 {
+    fn from(val: IPProtocol) -> Self {
+        match val {
             IPProtocol::ICMP => 1,
             IPProtocol::TCP => 6,
             IPProtocol::UDP => 17,
@@ -169,7 +169,7 @@ impl<'a> Ipv4Packet<'a> {
         let flags = 0b100
             + (if self.dont_fragment { 0b010 } else { 0 })
             + if self.more_fragments { 0b001 } else { 0 };
-        let flags_frag_offset = self.frag_offset + flags << 13;
+        let flags_frag_offset = (self.frag_offset + flags) << 13;
         result.extend_from_slice(&flags_frag_offset.to_be_bytes());
 
         result.extend_from_slice(&self.ttl.to_be_bytes());
@@ -182,8 +182,8 @@ impl<'a> Ipv4Packet<'a> {
 
         result.extend_from_slice(&self.source.octets());
         result.extend_from_slice(&self.dest.octets());
-        result.extend_from_slice(&self.options);
-        result.extend_from_slice(&self.data);
+        result.extend_from_slice(self.options);
+        result.extend_from_slice(self.data);
 
         let checksum = internet_checksum(&result[..20 + self.options.len()]).to_be_bytes();
 

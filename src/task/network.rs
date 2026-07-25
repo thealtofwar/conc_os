@@ -6,14 +6,10 @@ use core::{
 use conquer_once::spin::OnceCell;
 use crossbeam_queue::ArrayQueue;
 use futures_util::{Stream, StreamExt, task::AtomicWaker};
-use virtio_drivers::device::net::TxBuffer;
 
 use crate::{
     get_net_driver,
-    network::{
-        device::VirtioNetDriver,
-        handler::{EthernetFrame, MacAddress, get_network_interface, init_network_interface},
-    },
+    network::handler::{EthernetFrame, MacAddress, get_network_interface, init_network_interface},
     println,
 };
 

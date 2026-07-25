@@ -80,7 +80,7 @@ impl NetworkInterface {
             EthernetFrame::Ipv4(ipv4_packet) => {
                 self.handle_ipv4(ipv4_packet);
             }
-            EthernetFrame::Unknown(ethertype, items) => {
+            EthernetFrame::Unknown(_ethertype, _items) => {
                 // println!(
                 //     "got unknown ethernet frame with ethertype {ethertype} and len {}",
                 //     items.len()
@@ -125,7 +125,7 @@ impl NetworkInterface {
             sender_addr: self.ipv4.unwrap(),
 
             target_mac: MacAddress::new(&[0, 0, 0, 0, 0, 0]),
-            target_addr: target_addr,
+            target_addr,
         };
 
         self.send_frame(

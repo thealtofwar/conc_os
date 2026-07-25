@@ -2,7 +2,7 @@ use core::fmt::{Display, Formatter};
 
 use crate::{arp::ArpPacket, ipv4::Ipv4Packet};
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct MacAddress {
     pub addr: [u8; 6],
 }

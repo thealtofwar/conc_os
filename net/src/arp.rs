@@ -64,7 +64,7 @@ impl TryFrom<u16> for ArpOperation {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ArpPacket {
     pub hardware_type: u16,
     pub protocol_type: u16,
@@ -177,6 +177,7 @@ mod tests {
         };
 
         assert_eq!(packet.serialize(), VALID_ARP_REQUEST);
+        assert_eq!(ArpPacket::from_slice(&packet.serialize()), Ok(packet));
     }
 
     #[test]
@@ -192,6 +193,8 @@ mod tests {
         assert_eq!(packet.sender_addr.octets(), [192, 168, 1, 10]);
         assert_eq!(packet.target_mac.addr, [0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
         assert_eq!(packet.target_addr.octets(), [192, 168, 1, 20]);
+
+        assert_eq!(packet.serialize(), VALID_ARP_REQUEST);
     }
 
     #[test]

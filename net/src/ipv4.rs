@@ -53,18 +53,21 @@ pub struct Ipv4Packet<'a> {
     pub data: &'a [u8],
 }
 
-pub fn internet_checksum(packet: &[u8]) -> u16 {
+pub fn internet_checksum(packets: &[&[u8]]) -> u16 {
     let mut sum: u32 = 0;
 
-    for chunk in packet.chunks(2) {
-        let word = if chunk.len() == 2 {
-            u16::from_be_bytes([chunk[0], chunk[1]])
-        } else {
-            u16::from_be_bytes([chunk[0], 0])
-        };
+    for packet in packets {
+        for chunk in packet.chunks(2) {
+            let word = if chunk.len() == 2 {
+                u16::from_be_bytes([chunk[0], chunk[1]])
+            } else {
+                u16::from_be_bytes([chunk[0], 0])
+            };
 
-        sum += word as u32;
+            sum += word as u32;
+        }
     }
+
     while (sum >> 16) > 0 {
         sum = (sum & 0xFFFF) + (sum >> 16);
     }
@@ -130,7 +133,7 @@ impl<'a> Ipv4Packet<'a> {
 
         let checksum = u16::from_be_slice(&packet[10..12]);
 
-        if internet_checksum(&packet[..header_len]) != 0 {
+        if internet_checksum(&[&packet[..header_len]]) != 0 {
             return Err(());
         }
 
@@ -187,7 +190,7 @@ impl<'a> Ipv4Packet<'a> {
         result.extend_from_slice(self.options);
         result.extend_from_slice(self.data);
 
-        let checksum = internet_checksum(&result[..20 + self.options.len()]).to_be_bytes();
+        let checksum = internet_checksum(&[&result[..20 + self.options.len()]]).to_be_bytes();
 
         result[10..12].copy_from_slice(&checksum);
 
@@ -200,11 +203,21 @@ mod tests {
     use super::*;
 
     macro_rules! check_eq {
+        // 1. Matches existing single-field tests
+        // Example: check_eq!([0x01, 0x02], 0xffff);
         ($data:expr, $result:expr) => {{
-            let data = $data;
+            // Use `[..]` to ensure arrays are coerced into slices (`&[u8]`)
+            let data = &$data[..];
+            let checksum = internet_checksum(&[data]);
+            assert_eq!(checksum, $result);
+        }};
 
-            let checksum = internet_checksum(&data);
-
+        // 2. Matches new multi-field tests grouped in brackets
+        // Example: check_eq!([[0x01], [0x02]], 0xffff);
+        ([$($data:expr),+ $(,)?], $result:expr) => {{
+            // Coerce each expression into a slice and collect into an array of slices
+            let slices: &[&[u8]] = &[ $( &$data[..] ),+ ];
+            let checksum = internet_checksum(slices);
             assert_eq!(checksum, $result);
         }};
     }

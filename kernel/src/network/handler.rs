@@ -182,7 +182,7 @@ impl NetworkInterface {
 
     pub fn handle_icmp(&self, packet: &Ipv4Packet) {
         // validate checksum
-        if internet_checksum(packet.data) != 0 {
+        if internet_checksum(&[packet.data]) != 0 {
             println!("malformed ipv4 icmp packet");
             return;
         }
@@ -195,7 +195,7 @@ impl NetworkInterface {
             new_data[2] = 0; // zero out checksum
             new_data[3] = 0;
 
-            let checksum = internet_checksum(&new_data);
+            let checksum = internet_checksum(&[&new_data]);
 
             new_data[2..4].copy_from_slice(&checksum.to_be_bytes());
 

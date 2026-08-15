@@ -1,7 +1,10 @@
 use core::fmt::{self, Write};
 
-use spin::Mutex;
 use volatile::Volatile;
+
+use lazy_static::lazy_static;
+
+use crate::mutex::InterruptMutex;
 
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -108,11 +111,9 @@ impl Write for Writer {
     }
 }
 
-use lazy_static::lazy_static;
-
 lazy_static! {
-    pub static ref WRITER: Mutex<Writer> =
-        Mutex::new(Writer::new(ColorCode::new(Color::LightBlue, Color::Black)));
+    pub static ref WRITER: InterruptMutex<Writer> =
+        InterruptMutex::new(Writer::new(ColorCode::new(Color::LightBlue, Color::Black)));
 }
 
 #[macro_export]

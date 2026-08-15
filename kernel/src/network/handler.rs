@@ -82,7 +82,7 @@ impl NetworkInterface {
             hardware_len: 6,
             proto_len: 4,
 
-            operation: ArpOperation::Reply,
+            operation: ArpOperation::Request,
 
             sender_mac: self.mac,
             sender_addr: self.ipv4.unwrap(),
@@ -111,7 +111,8 @@ impl NetworkInterface {
         };
 
         let Some(arp_addr) = self.arp.lookup(next_hop) else {
-            unimplemented!("not in arp cache");
+            println!("not in arp cache");
+            return;
         };
 
         println!("arp addr is {}", arp_addr);
@@ -183,6 +184,7 @@ impl NetworkInterface {
         // validate checksum
         if internet_checksum(packet.data) != 0 {
             println!("malformed ipv4 icmp packet");
+            return;
         }
 
         if packet.data[0] == 8 && packet.data[1] == 0 {

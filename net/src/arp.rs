@@ -64,6 +64,13 @@ impl TryFrom<u16> for ArpOperation {
     }
 }
 
+#[derive(Debug)]
+pub enum ArpError {
+    LengthOutOfRange,
+    IncorrectFormat,
+    BadOperation,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ArpPacket {
     pub hardware_type: u16,
@@ -93,9 +100,9 @@ impl ArpPacket {
         pkt
     }
 
-    pub fn from_slice(packet_data: &[u8]) -> Result<Self, ()> {
+    pub fn from_slice(packet_data: &[u8]) -> Result<Self, ArpError> {
         if packet_data.len() < 28 {
-            return Err(());
+            return Err(ArpError::LengthOutOfRange);
         }
 
         let hardware_type = u16::from_be_slice(&packet_data[0..2]);
@@ -103,11 +110,12 @@ impl ArpPacket {
         let hardware_len = u8::from_be_slice(&packet_data[4..5]);
         let proto_len = u8::from_be_slice(&packet_data[5..6]);
 
-        let operation = ArpOperation::try_from(u16::from_be_slice(&packet_data[6..8]))?;
+        let operation = ArpOperation::try_from(u16::from_be_slice(&packet_data[6..8]))
+            .map_err(|_| ArpError::BadOperation)?;
 
         if hardware_type != 1 || protocol_type != 0x0800 || hardware_len != 6 || proto_len != 4 {
             // reject malformed packets
-            return Err(());
+            return Err(ArpError::IncorrectFormat);
         }
         Ok(ArpPacket {
             hardware_type,

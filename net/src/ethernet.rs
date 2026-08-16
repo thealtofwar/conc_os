@@ -1,6 +1,9 @@
 use core::fmt::{Display, Formatter};
 
-use crate::{arp::ArpPacket, ipv4::Ipv4Packet};
+use crate::{
+    arp::{ArpError, ArpPacket},
+    ipv4::{Ipv4Error, Ipv4Packet},
+};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct MacAddress {
@@ -45,16 +48,26 @@ pub enum EthernetFrame<'a> {
     Unknown(u16, &'a [u8]),
 }
 
+#[derive(Debug)]
+pub enum EthernetError {
+    Ipv4Err(Ipv4Error),
+    ArpError(ArpError),
+}
+
 impl<'a> EthernetFrame<'a> {
-    pub fn new(packet: &'a [u8]) -> Result<Self, ()> {
+    pub fn new(packet: &'a [u8]) -> Result<Self, EthernetError> {
         let ethertype = u16::from_be_bytes([packet[12], packet[13]]);
         match ethertype {
             0x0806 => {
                 let arp = &packet[14..];
 
-                Ok(Self::Arp(ArpPacket::from_slice(arp)?))
+                Ok(Self::Arp(
+                    ArpPacket::from_slice(arp).map_err(EthernetError::ArpError)?,
+                ))
             }
-            0x0800 => Ok(Self::Ipv4(Ipv4Packet::new(&packet[14..])?)),
+            0x0800 => Ok(Self::Ipv4(
+                Ipv4Packet::new(&packet[14..]).map_err(EthernetError::Ipv4Err)?,
+            )),
             _ => Ok(Self::Unknown(ethertype, packet)),
         }
     }

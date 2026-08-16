@@ -203,7 +203,7 @@ impl NetworkInterface {
             let reply = Ipv4Packet {
                 version_ihl: packet.version_ihl,
                 dscp_ecn: packet.dscp_ecn,
-                length: packet.length,
+                total_length: packet.total_length,
                 id: packet.id,
                 frag_offset: packet.frag_offset,
                 dont_fragment: packet.dont_fragment,

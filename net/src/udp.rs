@@ -27,7 +27,7 @@ pub struct UDPPacket<'a> {
 
 impl<'a> UDPPacket<'a> {
     pub fn new(ip_packet: &'a Ipv4Packet) -> Result<Self, UDPError> {
-        if ip_packet.length < 28 || ip_packet.data.len() < 8 || ip_packet.data.len() > 65535 {
+        if ip_packet.total_length < 28 || ip_packet.data.len() < 8 || ip_packet.data.len() > 65535 {
             return Err(UDPError::LengthOutOfRange);
         }
 
@@ -48,7 +48,7 @@ impl<'a> UDPPacket<'a> {
             &ip_packet.dest.octets(),
             &[0x0, 0x11],
             &datagram_len.to_be_bytes(),
-            &ip_packet.data,
+            ip_packet.data,
         ]) != 0
             && checksum != 0
         {
@@ -93,7 +93,7 @@ impl<'a> UDPPacket<'a> {
             &[0x0, 0x11],
             &total_datagram_len.to_be_bytes(),
             &result, // result so far is the UDP header, which is used to calculate the checksum
-            &self.data,
+            self.data,
         ]);
 
         if checksum == 0x0000 {
@@ -102,7 +102,7 @@ impl<'a> UDPPacket<'a> {
 
         result.extend_from_slice(&checksum.to_be_bytes());
 
-        result.extend_from_slice(&self.data);
+        result.extend_from_slice(self.data);
 
         Ok(result)
     }
@@ -166,7 +166,7 @@ mod tests {
         Ipv4Packet {
             version_ihl: 0x40 | (header_len / 4) as u8,
             dscp_ecn: 0x00,
-            length: (header_len + udp.len()) as u16,
+            total_length: (header_len + udp.len()) as u16,
             id: 0x1234,
             frag_offset: 0,
             dont_fragment: true,

@@ -36,11 +36,22 @@ impl From<IPProtocol> for u8 {
     }
 }
 
+#[derive(Debug)]
+pub enum Ipv4Error {
+    VersionMismatch,
+    LengthOutOfRange,
+    IHLMismatch,
+    HeaderLengthMismatch,
+    TotalLengthMismatch,
+    EvilBitSet,
+    IncorrectChecksum,
+}
+
 pub struct Ipv4Packet<'a> {
     pub version_ihl: u8,
     pub dscp_ecn: u8,
     /// length of the IP packet, including the IPv4 header
-    pub length: u16,
+    pub total_length: u16,
     pub id: u16,
     pub frag_offset: u16,
     pub dont_fragment: bool,
@@ -77,9 +88,9 @@ pub fn internet_checksum(packet_parts: &[&[u8]]) -> u16 {
 }
 
 impl<'a> Ipv4Packet<'a> {
-    pub fn new(packet: &'a [u8]) -> Result<Self, ()> {
+    pub fn new(packet: &'a [u8]) -> Result<Self, Ipv4Error> {
         if packet.len() < 20 {
-            return Err(());
+            return Err(Ipv4Error::LengthOutOfRange);
         }
 
         let version_ihl = u8::from_be_slice(&packet[0..1]);
@@ -87,19 +98,19 @@ impl<'a> Ipv4Packet<'a> {
         let version = (version_ihl >> 4) & 0xf;
 
         if version != 4 {
-            return Err(());
+            return Err(Ipv4Error::VersionMismatch);
         }
 
         let ihl = version_ihl & 0xf;
 
         if ihl < 5 {
-            return Err(());
+            return Err(Ipv4Error::IHLMismatch);
         }
 
         let header_len = (ihl * 4) as usize;
 
         if header_len > packet.len() {
-            return Err(());
+            return Err(Ipv4Error::HeaderLengthMismatch);
         }
 
         let dscp_ecn: u8 = u8::from_be_slice(&packet[1..2]);
@@ -107,7 +118,7 @@ impl<'a> Ipv4Packet<'a> {
         let total_length = u16::from_be_slice(&packet[2..4]) as usize;
 
         if total_length > packet.len() || total_length < header_len {
-            return Err(());
+            return Err(Ipv4Error::TotalLengthMismatch);
         }
 
         let packet = &packet[..total_length];
@@ -125,7 +136,7 @@ impl<'a> Ipv4Packet<'a> {
         let more_fragments = flags & 0b001 != 0;
 
         if evil_bit {
-            return Err(());
+            return Err(Ipv4Error::EvilBitSet);
         }
 
         let ttl = u8::from_be_slice(&packet[8..9]);
@@ -135,7 +146,7 @@ impl<'a> Ipv4Packet<'a> {
         let checksum = u16::from_be_slice(&packet[10..12]);
 
         if internet_checksum(&[&packet[..header_len]]) != 0 {
-            return Err(());
+            return Err(Ipv4Error::IncorrectChecksum);
         }
 
         let src_addr = Ipv4Addr::from_octets(*(packet[12..16].as_array().expect("invalid length")));
@@ -149,7 +160,7 @@ impl<'a> Ipv4Packet<'a> {
         Ok(Ipv4Packet {
             version_ihl,
             dscp_ecn,
-            length: total_length as u16,
+            total_length: total_length as u16,
             id,
             frag_offset,
             dont_fragment,
@@ -169,7 +180,7 @@ impl<'a> Ipv4Packet<'a> {
 
         result.push(self.version_ihl);
         result.push(self.dscp_ecn);
-        result.extend_from_slice(&self.length.to_be_bytes());
+        result.extend_from_slice(&self.total_length.to_be_bytes());
         result.extend_from_slice(&self.id.to_be_bytes());
 
         let flags = (if self.dont_fragment { 0b010 } else { 0 })
@@ -181,10 +192,7 @@ impl<'a> Ipv4Packet<'a> {
         result.extend_from_slice(&self.ttl.to_be_bytes());
         result.push(self.protocol.into());
 
-        for _ in 0..2 {
-            // checksum
-            result.push(0);
-        }
+        result.extend(core::iter::repeat_n(0, 2));
 
         result.extend_from_slice(&self.source.octets());
         result.extend_from_slice(&self.dest.octets());
@@ -261,7 +269,7 @@ mod tests {
 
         assert_eq!(packet.version_ihl, 0x45);
         assert_eq!(packet.dscp_ecn, 0x00);
-        assert_eq!(packet.length, 24);
+        assert_eq!(packet.total_length, 24);
         assert_eq!(packet.id, 0x1234);
         assert_eq!(packet.dont_fragment, true);
         assert_eq!(packet.more_fragments, false);

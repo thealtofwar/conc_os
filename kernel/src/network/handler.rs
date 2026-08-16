@@ -1,7 +1,7 @@
 use crate::{network::device::get_net_driver, println};
 use alloc::borrow::ToOwned;
 use alloc::vec;
-use conc_os_net::arp::{ArpCache, ArpOperation, ArpPacket};
+use conc_os_net::arp::{ArpCache, ArpOperation, ArpPacket, Queued};
 use conc_os_net::ethernet::{EtherType, EthernetFrame, MacAddress};
 use conc_os_net::ipv4::{IPProtocol, Ipv4Packet, internet_checksum};
 use core::net::Ipv4Addr;
@@ -98,7 +98,13 @@ impl NetworkInterface {
         );
     }
 
-    pub fn send_ipv4(&self, dst: Ipv4Addr, packet: &Ipv4Packet) {
+    /// Sends `packet` to `dst`, resolving the next hop first if it is unknown.
+    ///
+    /// A packet whose next hop has not resolved yet is parked in the ARP cache
+    /// and an ARP request goes out in its place. [`NetworkInterface::handle_arp`]
+    /// sends it when the reply arrives. Nothing here waits: this runs inside the
+    /// receive path, which is the only thing that can deliver that reply.
+    pub fn send_ipv4(&mut self, dst: Ipv4Addr, packet: &Ipv4Packet) {
         // for now, we assume that the subnet mask is 255.255.255.0, and the gateway is 10.0.2.2
         let Some(my_ip) = self.ipv4 else {
             return;
@@ -110,20 +116,32 @@ impl NetworkInterface {
             Ipv4Addr::new(10, 0, 2, 2)
         };
 
-        let Some(arp_addr) = self.arp.lookup(next_hop) else {
-            println!("not in arp cache");
+        // Serialized up front: what gets parked is a finished IPv4 packet that
+        // lacks only a destination MAC, so flushing it later is just a send.
+        let frame = packet.serialize();
+
+        if let Some(arp_addr) = self.arp.lookup(next_hop) {
+            self.send_frame(arp_addr, EtherType::IPV4, &frame);
             return;
-        };
+        }
 
-        println!("arp addr is {}", arp_addr);
-
-        self.send_frame(arp_addr, EtherType::IPV4, &packet.serialize());
+        match self.arp.queue_pending(next_hop, frame) {
+            Queued::RequestNeeded => self.send_arp_request(next_hop),
+            Queued::AlreadyPending => {}
+            Queued::Dropped => println!("dropped packet for {next_hop}: ARP queue full"),
+        }
     }
 
     pub fn handle_arp(&mut self, arp_packet: &ArpPacket) {
         if arp_packet.sender_mac != self.mac {
-            self.arp
-                .insert(arp_packet.sender_addr, arp_packet.sender_mac);
+            // `insert` hands back whatever was parked on this address, so
+            // learning an address always flushes its queue.
+            for frame in self
+                .arp
+                .insert(arp_packet.sender_addr, arp_packet.sender_mac)
+            {
+                self.send_frame(arp_packet.sender_mac, EtherType::IPV4, &frame);
+            }
         }
 
         if arp_packet.operation == ArpOperation::Request
@@ -156,7 +174,7 @@ impl NetworkInterface {
         );
     }
 
-    pub fn handle_ipv4(&self, ipv4_packet: &Ipv4Packet) {
+    pub fn handle_ipv4(&mut self, ipv4_packet: &Ipv4Packet) {
         if ipv4_packet.more_fragments || ipv4_packet.frag_offset != 0 {
             // don't handle fragmented ipv4 packets
             return;
@@ -180,7 +198,7 @@ impl NetworkInterface {
         }
     }
 
-    pub fn handle_icmp(&self, packet: &Ipv4Packet) {
+    pub fn handle_icmp(&mut self, packet: &Ipv4Packet) {
         // validate checksum
         if internet_checksum(&[packet.data]) != 0 {
             println!("malformed ipv4 icmp packet");

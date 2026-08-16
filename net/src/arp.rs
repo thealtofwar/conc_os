@@ -64,7 +64,7 @@ impl TryFrom<u16> for ArpOperation {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ArpError {
     LengthOutOfRange,
     IncorrectFormat,
@@ -210,8 +210,9 @@ mod tests {
         let mut malformed = VALID_ARP_REQUEST;
         malformed[1] = 0x02; // Change hardware type to Experimental Ethernet (2)
 
-        assert!(
-            ArpPacket::from_slice(&malformed).is_err(),
+        assert_eq!(
+            ArpPacket::from_slice(&malformed),
+            Err(ArpError::IncorrectFormat),
             "Should reject non-Ethernet hardware types"
         );
     }
@@ -222,8 +223,9 @@ mod tests {
         malformed[2] = 0x86;
         malformed[3] = 0xDD; // Change protocol type to IPv6 (0x86DD)
 
-        assert!(
-            ArpPacket::from_slice(&malformed).is_err(),
+        assert_eq!(
+            ArpPacket::from_slice(&malformed),
+            Err(ArpError::IncorrectFormat),
             "Should reject non-IPv4 protocol types"
         );
     }
@@ -232,30 +234,58 @@ mod tests {
     fn test_arp_deserialization_rejects_invalid_lengths() {
         let mut malformed_hw_len = VALID_ARP_REQUEST;
         malformed_hw_len[4] = 8; // Invalid MAC length
-        assert!(
-            ArpPacket::from_slice(&malformed_hw_len).is_err(),
+        assert_eq!(
+            ArpPacket::from_slice(&malformed_hw_len),
+            Err(ArpError::IncorrectFormat),
             "Should reject invalid hardware length"
         );
 
         let mut malformed_proto_len = VALID_ARP_REQUEST;
         malformed_proto_len[5] = 6; // Invalid IP length
-        assert!(
-            ArpPacket::from_slice(&malformed_proto_len).is_err(),
+        assert_eq!(
+            ArpPacket::from_slice(&malformed_proto_len),
+            Err(ArpError::IncorrectFormat),
             "Should reject invalid protocol length"
         );
     }
 
     #[test]
-    fn test_arp_deserialization_short_buffer() {
-        // A buffer that is too short for a complete ARP packet (e.g., 20 bytes instead of 28).
-        // This test will FAIL with your current implementation because `from_slice` panics
-        // when indexing `&packet_data[24..28]` instead of gracefully returning an Err(()).
-        let short_buffer = &VALID_ARP_REQUEST[0..20];
+    fn test_arp_deserialization_rejects_unknown_operation() {
+        // Only Request (1) and Reply (2) are defined; RARP opcodes and garbage are not.
+        for opcode in [0u16, 3, 4, 0xffff] {
+            let mut malformed = VALID_ARP_REQUEST;
+            malformed[6..8].copy_from_slice(&opcode.to_be_bytes());
 
-        let result = ArpPacket::from_slice(short_buffer);
-        assert!(
-            result.is_err(),
-            "Parsing a short buffer should return an Error, not panic"
-        );
+            assert_eq!(
+                ArpPacket::from_slice(&malformed),
+                Err(ArpError::BadOperation),
+                "opcode {opcode} is not a supported ARP operation"
+            );
+        }
+    }
+
+    #[test]
+    fn test_arp_deserialization_short_buffer() {
+        // Anything short of the full 28 bytes must be reported rather than indexed
+        // into: the last field read is `&packet_data[24..28]`.
+        for len in [0, 8, 20, 27] {
+            assert_eq!(
+                ArpPacket::from_slice(&VALID_ARP_REQUEST[..len]),
+                Err(ArpError::LengthOutOfRange),
+                "a {len} byte buffer is shorter than an ARP packet"
+            );
+        }
+    }
+
+    #[test]
+    fn test_arp_deserialization_ignores_trailing_bytes() {
+        // Ethernet pads short frames, so a valid packet can arrive with trailing
+        // filler that must not affect parsing.
+        let mut padded = [0u8; 60];
+        padded[..28].copy_from_slice(&VALID_ARP_REQUEST);
+
+        let packet = ArpPacket::from_slice(&padded).expect("padding is not part of the packet");
+
+        assert_eq!(packet.serialize(), VALID_ARP_REQUEST);
     }
 }

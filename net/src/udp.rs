@@ -10,7 +10,7 @@ use crate::utils::FromSlice;
 // 65527 = 65535 (u16 max) - 8 (UDP header size)
 const MAX_UDP_PAYLOAD: usize = 65527;
 
-#[derive(Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum UDPError {
     LengthOutOfRange,
     LengthMismatch,
@@ -113,18 +113,6 @@ mod tests {
     use super::*;
 
     use crate::ipv4::IPProtocol;
-
-    /// Asserts that a result is an `Err` of the given `UDPError` variant.
-    /// `UDPPacket` is not `Debug`, so the `Ok` case is reported by hand.
-    macro_rules! assert_err {
-        ($result:expr, $expected:pat $(,)?) => {
-            match $result {
-                Err($expected) => {}
-                Err(other) => panic!("expected {}, got {other:?}", stringify!($expected)),
-                Ok(_) => panic!("expected {}, got Ok", stringify!($expected)),
-            }
-        };
-    }
 
     const SRC: Ipv4Addr = Ipv4Addr::new(192, 168, 1, 1);
     const DST: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 1);
@@ -295,7 +283,7 @@ mod tests {
         let bytes = ipv4_wrap(SRC, DST, &datagram);
         let ip = Ipv4Packet::new(&bytes).expect("failed to parse valid IPv4 packet");
 
-        assert_err!(UDPPacket::new(&ip), UDPError::IncorrectChecksum);
+        assert_eq!(UDPPacket::new(&ip).err(), Some(UDPError::IncorrectChecksum));
     }
 
     #[test]
@@ -306,7 +294,7 @@ mod tests {
         let bytes = ipv4_wrap(SRC, DST, &datagram);
         let ip = Ipv4Packet::new(&bytes).expect("failed to parse valid IPv4 packet");
 
-        assert_err!(UDPPacket::new(&ip), UDPError::IncorrectChecksum);
+        assert_eq!(UDPPacket::new(&ip).err(), Some(UDPError::IncorrectChecksum));
     }
 
     #[test]
@@ -318,7 +306,7 @@ mod tests {
         let bytes = ipv4_wrap(SRC, DST, &datagram);
         let ip = Ipv4Packet::new(&bytes).expect("failed to parse valid IPv4 packet");
 
-        assert_err!(UDPPacket::new(&ip), UDPError::IncorrectChecksum);
+        assert_eq!(UDPPacket::new(&ip).err(), Some(UDPError::IncorrectChecksum));
     }
 
     #[test]
@@ -332,7 +320,7 @@ mod tests {
         let bytes = ipv4_wrap(SRC, DST, &datagram);
         let ip = Ipv4Packet::new(&bytes).expect("failed to parse valid IPv4 packet");
 
-        assert_err!(UDPPacket::new(&ip), UDPError::LengthMismatch);
+        assert_eq!(UDPPacket::new(&ip).err(), Some(UDPError::LengthMismatch));
     }
 
     #[test]
@@ -346,7 +334,7 @@ mod tests {
         let bytes = ipv4_wrap(SRC, DST, &datagram);
         let ip = Ipv4Packet::new(&bytes).expect("failed to parse valid IPv4 packet");
 
-        assert_err!(UDPPacket::new(&ip), UDPError::LengthMismatch);
+        assert_eq!(UDPPacket::new(&ip).err(), Some(UDPError::LengthMismatch));
     }
 
     #[test]
@@ -358,7 +346,7 @@ mod tests {
         let bytes = ipv4_wrap(SRC, DST, &datagram);
         let ip = Ipv4Packet::new(&bytes).expect("failed to parse valid IPv4 packet");
 
-        assert_err!(UDPPacket::new(&ip), UDPError::LengthMismatch);
+        assert_eq!(UDPPacket::new(&ip).err(), Some(UDPError::LengthMismatch));
     }
 
     #[test]
@@ -372,7 +360,7 @@ mod tests {
         let bytes = ipv4_wrap(SRC, DST, &datagram);
         let ip = Ipv4Packet::new(&bytes).expect("failed to parse valid IPv4 packet");
 
-        assert_err!(UDPPacket::new(&ip), UDPError::LengthMismatch);
+        assert_eq!(UDPPacket::new(&ip).err(), Some(UDPError::LengthMismatch));
     }
 
     #[test]
@@ -381,8 +369,11 @@ mod tests {
             let bytes = ipv4_wrap(SRC, DST, &VALID_UDP[..len]);
             let ip = Ipv4Packet::new(&bytes).expect("the IPv4 wrapper is still well formed");
 
-            // `len` bytes is shorter than the 8 byte UDP header.
-            assert_err!(UDPPacket::new(&ip), UDPError::LengthOutOfRange);
+            assert_eq!(
+                UDPPacket::new(&ip).err(),
+                Some(UDPError::LengthOutOfRange),
+                "{len} bytes is shorter than the 8 byte UDP header"
+            );
         }
     }
 
@@ -394,7 +385,11 @@ mod tests {
             let bytes = ipv4_wrap_with_options(SRC, DST, &[0x01; 4], &VALID_UDP[..len]);
             let ip = Ipv4Packet::new(&bytes).expect("the IPv4 wrapper is still well formed");
 
-            assert_err!(UDPPacket::new(&ip), UDPError::LengthOutOfRange);
+            assert_eq!(
+                UDPPacket::new(&ip).err(),
+                Some(UDPError::LengthOutOfRange),
+                "{len} bytes is shorter than the 8 byte UDP header"
+            );
         }
     }
 
@@ -403,7 +398,7 @@ mod tests {
         let bytes = ipv4_wrap(SRC, DST, &[]);
         let ip = Ipv4Packet::new(&bytes).expect("an IPv4 packet with no payload is well formed");
 
-        assert_err!(UDPPacket::new(&ip), UDPError::LengthOutOfRange);
+        assert_eq!(UDPPacket::new(&ip).err(), Some(UDPError::LengthOutOfRange));
     }
 
     #[test]
@@ -547,9 +542,9 @@ mod tests {
             data: &payload,
         };
 
-        assert_err!(
-            packet.serialize_ipv4(&SRC, &DST),
-            UDPError::LengthOutOfRange
+        assert_eq!(
+            packet.serialize_ipv4(&SRC, &DST).err(),
+            Some(UDPError::LengthOutOfRange)
         );
     }
 
@@ -567,9 +562,9 @@ mod tests {
             data: &payload,
         };
 
-        assert_err!(
-            packet.serialize_ipv4(&SRC, &DST),
-            UDPError::LengthOutOfRange
+        assert_eq!(
+            packet.serialize_ipv4(&SRC, &DST).err(),
+            Some(UDPError::LengthOutOfRange)
         );
     }
 }

@@ -36,7 +36,7 @@ impl From<IPProtocol> for u8 {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Ipv4Error {
     VersionMismatch,
     LengthOutOfRange,
@@ -47,6 +47,7 @@ pub enum Ipv4Error {
     IncorrectChecksum,
 }
 
+#[derive(Debug, PartialEq, Eq)]
 pub struct Ipv4Packet<'a> {
     pub version_ihl: u8,
     pub dscp_ecn: u8,
@@ -271,8 +272,8 @@ mod tests {
         assert_eq!(packet.dscp_ecn, 0x00);
         assert_eq!(packet.total_length, 24);
         assert_eq!(packet.id, 0x1234);
-        assert_eq!(packet.dont_fragment, true);
-        assert_eq!(packet.more_fragments, false);
+        assert!(packet.dont_fragment);
+        assert!(!packet.more_fragments);
         assert_eq!(packet.frag_offset, 0);
         assert_eq!(packet.ttl, 64);
         assert_eq!(packet.protocol, IPProtocol::UDP);
@@ -321,30 +322,64 @@ mod tests {
         // premature rejection in the current implementation.
         let packet = Ipv4Packet::new(&data).expect("Should parse standard fragmented IPv4 packets");
 
-        assert_eq!(packet.more_fragments, true);
-        assert_eq!(packet.dont_fragment, false);
+        assert!(packet.more_fragments);
+        assert!(!packet.dont_fragment);
         assert_eq!(packet.frag_offset, 0);
+    }
+
+    /// Recomputes the header checksum in place, so that each malformed packet test
+    /// isolates the one defect it is about.
+    fn fix_header_checksum(packet: &mut [u8]) {
+        let header_len = (((packet[0] & 0xf) as usize) * 4).clamp(20, packet.len());
+
+        packet[10..12].copy_from_slice(&[0x0, 0x0]);
+
+        let checksum = internet_checksum(&[&packet[..header_len]]);
+
+        packet[10..12].copy_from_slice(&checksum.to_be_bytes());
     }
 
     #[test]
     fn test_ipv4_invalid_version() {
-        let mut data = get_valid_packet();
-        data[0] = 0x55; // Version 5, IHL 5
-        assert!(Ipv4Packet::new(&data).is_err());
+        for version in [0x0, 0x5, 0x6, 0xf] {
+            let mut data = get_valid_packet();
+            data[0] = (version << 4) | 0x5; // IHL stays at 5
+            fix_header_checksum(&mut data);
+
+            assert_eq!(
+                Ipv4Packet::new(&data).err(),
+                Some(Ipv4Error::VersionMismatch),
+                "version {version} is not IPv4"
+            );
+        }
     }
 
     #[test]
-    fn test_ipv4_bad_checksum() {
-        let mut data = get_valid_packet();
-        data[11] = 0x00; // Corrupt the checksum
-        assert!(Ipv4Packet::new(&data).is_err());
+    fn test_ipv4_ihl_below_minimum() {
+        // The header is at least five 32 bit words; a smaller IHL cannot describe one.
+        for ihl in [0x0, 0x1, 0x4] {
+            let mut data = get_valid_packet();
+            data[0] = 0x40 | ihl;
+            fix_header_checksum(&mut data);
+
+            assert_eq!(
+                Ipv4Packet::new(&data).err(),
+                Some(Ipv4Error::IHLMismatch),
+                "IHL {ihl} is below the 5 word minimum"
+            );
+        }
     }
 
     #[test]
-    fn test_ipv4_too_short() {
-        let data = get_valid_packet();
-        let short_data = &data[..15]; // Less than the minimum 20 bytes
-        assert!(Ipv4Packet::new(short_data).is_err());
+    fn test_ipv4_header_exceeds_buffer() {
+        let mut data = get_valid_packet();
+        data[0] = 0x4f; // IHL 15 claims a 60 byte header, the buffer holds 24
+        fix_header_checksum(&mut data);
+
+        assert_eq!(
+            Ipv4Packet::new(&data).err(),
+            Some(Ipv4Error::HeaderLengthMismatch)
+        );
     }
 
     #[test]
@@ -352,6 +387,81 @@ mod tests {
         let mut data = get_valid_packet();
         data[2] = 0x00;
         data[3] = 0xFF; // Declared total_length is 255, but buffer is only 24 bytes
-        assert!(Ipv4Packet::new(&data).is_err());
+        fix_header_checksum(&mut data);
+
+        assert_eq!(
+            Ipv4Packet::new(&data).err(),
+            Some(Ipv4Error::TotalLengthMismatch)
+        );
+    }
+
+    #[test]
+    fn test_ipv4_length_below_header() {
+        let mut data = get_valid_packet();
+        data[0] = 0x46; // IHL 6 -> a 24 byte header
+        data[3] = 0x14; // but a declared total length of 20
+        fix_header_checksum(&mut data);
+
+        assert_eq!(
+            Ipv4Packet::new(&data).err(),
+            Some(Ipv4Error::TotalLengthMismatch)
+        );
+    }
+
+    #[test]
+    fn test_ipv4_evil_bit() {
+        let mut data = get_valid_packet();
+        data[6] |= 0x80; // RFC 3514 evil bit, alongside the existing DF flag
+        fix_header_checksum(&mut data);
+
+        assert_eq!(Ipv4Packet::new(&data).err(), Some(Ipv4Error::EvilBitSet));
+    }
+
+    #[test]
+    fn test_ipv4_bad_checksum() {
+        let mut data = get_valid_packet();
+        data[11] = 0x00; // Corrupt the checksum
+        assert_eq!(
+            Ipv4Packet::new(&data).err(),
+            Some(Ipv4Error::IncorrectChecksum)
+        );
+    }
+
+    #[test]
+    fn test_ipv4_corrupt_header_field() {
+        let mut data = get_valid_packet();
+        data[8] = 0x01; // A TTL the checksum was not computed over
+        assert_eq!(
+            Ipv4Packet::new(&data).err(),
+            Some(Ipv4Error::IncorrectChecksum)
+        );
+    }
+
+    #[test]
+    fn test_ipv4_too_short() {
+        // Short buffers are rejected before any header field is read, so a buffer
+        // too short to even hold the version byte is still an Err, not a panic.
+        for len in [0, 1, 15, 19] {
+            let data = get_valid_packet();
+
+            assert_eq!(
+                Ipv4Packet::new(&data[..len]).err(),
+                Some(Ipv4Error::LengthOutOfRange),
+                "a {len} byte buffer is shorter than the 20 byte minimum header"
+            );
+        }
+    }
+
+    #[test]
+    fn test_ipv4_ignores_trailing_bytes() {
+        // The total length field, not the buffer, bounds the packet: an Ethernet
+        // frame can carry padding after the IPv4 packet.
+        let mut data = get_valid_packet();
+        data.extend_from_slice(&[0x00; 20]);
+
+        let packet = Ipv4Packet::new(&data).expect("padding is not part of the packet");
+
+        assert_eq!(packet.total_length, 24);
+        assert_eq!(packet.data, &[0xde, 0xad, 0xbe, 0xef]);
     }
 }

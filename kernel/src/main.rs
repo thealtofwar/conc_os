@@ -12,6 +12,7 @@ pub mod memory;
 pub mod mutex;
 pub mod network;
 pub mod pci;
+pub mod rng;
 pub mod serial;
 pub mod task;
 pub mod vga;
@@ -32,6 +33,7 @@ use crate::{
     apic::init_apic,
     memory::{MAPPER, OFFSET},
     network::device::{get_net_driver, init_virtio_net_pci},
+    rng::init_virtio_rng,
     serial::{TTYErr, readline},
     task::{Task, executor::Executor, network::network_task, serial::SerialStream},
 };
@@ -55,7 +57,10 @@ fn init(boot_info: &'static BootInfo) {
     lazy_static::initialize(&crate::serial::SERIAL_TTY);
     init_apic();
     init_virtio_net_pci();
+    println!("virtio rng: {}", init_virtio_rng());
     x86_64::instructions::interrupts::enable();
+
+    // get_net_driver().lock().init_dhcp();
 }
 
 fn kernel_main(boot_info: &'static BootInfo) -> ! {

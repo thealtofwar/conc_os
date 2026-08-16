@@ -39,6 +39,7 @@ impl From<IPProtocol> for u8 {
 pub struct Ipv4Packet<'a> {
     pub version_ihl: u8,
     pub dscp_ecn: u8,
+    /// length of the IP packet, including the IPv4 header
     pub length: u16,
     pub id: u16,
     pub frag_offset: u16,
@@ -53,11 +54,11 @@ pub struct Ipv4Packet<'a> {
     pub data: &'a [u8],
 }
 
-pub fn internet_checksum(packets: &[&[u8]]) -> u16 {
+pub fn internet_checksum(packet_parts: &[&[u8]]) -> u16 {
     let mut sum: u32 = 0;
 
-    for packet in packets {
-        for chunk in packet.chunks(2) {
+    for part in packet_parts {
+        for chunk in part.chunks(2) {
             let word = if chunk.len() == 2 {
                 u16::from_be_bytes([chunk[0], chunk[1]])
             } else {

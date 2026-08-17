@@ -36,7 +36,7 @@ use crate::{
         device::{get_net_driver, init_virtio_net_pci},
         handler::get_network_interface,
     },
-    rng::init_virtio_rng,
+    rng::init_entropy,
     serial::{TTYErr, readline},
     task::{Task, executor::Executor, network::network_task, serial::SerialStream},
 };
@@ -44,6 +44,11 @@ use crate::{
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
     println!("{info}");
+    // Also out the serial port: VGA is the only channel a remote hypervisor
+    // console will not necessarily show you, and a panic that is invisible
+    // reads exactly like a hang. If the panic happened while SERIAL_TTY was
+    // held this deadlocks, in which case the VGA line above is still there.
+    serial::print(format_args!("PANIC: {info}\n"));
     loop {}
 }
 
@@ -60,7 +65,7 @@ fn init(boot_info: &'static BootInfo) {
     lazy_static::initialize(&crate::serial::SERIAL_TTY);
     init_apic();
     init_virtio_net_pci();
-    println!("virtio rng: {}", init_virtio_rng());
+    println!("entropy: {:?}", init_entropy());
     x86_64::instructions::interrupts::enable();
 }
 

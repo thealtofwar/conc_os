@@ -288,22 +288,15 @@ impl NetworkInterface {
 
             new_data[2..4].copy_from_slice(&checksum.to_be_bytes());
 
-            // ping packet request
-            let reply = Ipv4Packet {
-                version_ihl: packet.version_ihl,
-                dscp_ecn: packet.dscp_ecn,
-                total_length: packet.total_length,
-                id: packet.id,
-                frag_offset: packet.frag_offset,
-                dont_fragment: packet.dont_fragment,
-                more_fragments: packet.more_fragments,
-                ttl: packet.ttl,
-                protocol: packet.protocol,
-                checksum: 0,
-                source: src,
-                dest: packet.source,
-                options: &[],
-                data: &new_data,
+            // Built rather than copied from the request: the header describes
+            // the packet we are sending, and we send no options, so a request
+            // carrying them must not leave us claiming a header length we do
+            // not write. `new` derives the length fields from `new_data`.
+            let Ok(reply) =
+                Ipv4Packet::new(&new_data, src, packet.source, packet.id, IPProtocol::ICMP)
+            else {
+                println!("we tried to create invalid icmp packet");
+                return;
             };
 
             self.send_ipv4(reply.dest, &reply);

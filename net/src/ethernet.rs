@@ -71,7 +71,7 @@ impl<'a> EthernetFrame<'a> {
                 ))
             }
             0x0800 => Ok(Self::Ipv4(
-                Ipv4Packet::new(&packet[14..]).map_err(EthernetError::Ipv4Err)?,
+                Ipv4Packet::from_packet(&packet[14..]).map_err(EthernetError::Ipv4Err)?,
             )),
             _ => Ok(Self::Unknown(ethertype, &packet)),
         }

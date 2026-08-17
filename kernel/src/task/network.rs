@@ -100,7 +100,7 @@ fn process_rx(packet: &[u8]) {
     }
 
     if let Ok(pkt) = EthernetFrame::new(packet) {
-        get_network_interface().lock().handle_packet(&pkt);
+        get_network_interface().lock().handle_packet(&pkt, dst);
     } else {
         println!("rejected malformed packet")
     }

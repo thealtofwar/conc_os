@@ -32,7 +32,10 @@ use crate::{
     },
     apic::init_apic,
     memory::{MAPPER, OFFSET},
-    network::device::{get_net_driver, init_virtio_net_pci},
+    network::{
+        device::{get_net_driver, init_virtio_net_pci},
+        handler::get_network_interface,
+    },
     rng::init_virtio_rng,
     serial::{TTYErr, readline},
     task::{Task, executor::Executor, network::network_task, serial::SerialStream},
@@ -59,8 +62,6 @@ fn init(boot_info: &'static BootInfo) {
     init_virtio_net_pci();
     println!("virtio rng: {}", init_virtio_rng());
     x86_64::instructions::interrupts::enable();
-
-    // get_net_driver().lock().init_dhcp();
 }
 
 fn kernel_main(boot_info: &'static BootInfo) -> ! {

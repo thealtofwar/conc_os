@@ -26,7 +26,34 @@ pub struct UDPPacket<'a> {
 }
 
 impl<'a> UDPPacket<'a> {
-    pub fn new(ip_packet: &'a Ipv4Packet) -> Result<Self, UDPError> {
+    pub fn new(source_port: u16, dest_port: u16, data: &'a [u8]) -> Result<Self, UDPError> {
+        Ok(Self {
+            source_port,
+            dest_port,
+            datagram_length: u16::try_from(data.len() + 8)
+                .map_err(|_| UDPError::LengthOutOfRange)?,
+            checksum: 0, // recomputed during serialization
+            data,
+        })
+    }
+
+    pub fn source_port(&self) -> u16 {
+        self.source_port
+    }
+
+    pub fn dest_port(&self) -> u16 {
+        self.dest_port
+    }
+
+    pub fn data(&self) -> &'a [u8] {
+        self.data
+    }
+
+    pub fn len(&self) -> usize {
+        self.data.len()
+    }
+
+    pub fn from_packet(ip_packet: &'a Ipv4Packet) -> Result<Self, UDPError> {
         if ip_packet.total_length < 28 || ip_packet.data.len() < 8 || ip_packet.data.len() > 65535 {
             return Err(UDPError::LengthOutOfRange);
         }
@@ -225,9 +252,9 @@ mod tests {
     #[test]
     fn test_udp_parse_valid() {
         let bytes = ipv4_wrap(SRC, DST, &VALID_UDP);
-        let ip = Ipv4Packet::new(&bytes).expect("failed to parse valid IPv4 packet");
+        let ip = Ipv4Packet::from_packet(&bytes).expect("failed to parse valid IPv4 packet");
 
-        let packet = UDPPacket::new(&ip).expect("failed to parse valid UDP datagram");
+        let packet = UDPPacket::from_packet(&ip).expect("failed to parse valid UDP datagram");
 
         assert_eq!(packet.source_port, 0x1234);
         assert_eq!(packet.dest_port, 0x5678);
@@ -240,9 +267,9 @@ mod tests {
     #[test]
     fn test_udp_parse_empty_payload() {
         let bytes = ipv4_wrap(SRC, DST, &VALID_UDP_EMPTY);
-        let ip = Ipv4Packet::new(&bytes).expect("failed to parse valid IPv4 packet");
+        let ip = Ipv4Packet::from_packet(&bytes).expect("failed to parse valid IPv4 packet");
 
-        let packet = UDPPacket::new(&ip).expect("a header only datagram is valid");
+        let packet = UDPPacket::from_packet(&ip).expect("a header only datagram is valid");
 
         assert_eq!(packet.datagram_length, 8);
         assert_eq!(packet.data, &[]);
@@ -253,9 +280,9 @@ mod tests {
         // With options present the IPv4 total length is 28 + payload, which the UDP
         // length field must not be compared against.
         let bytes = ipv4_wrap_with_options(SRC, DST, &[0x01, 0x01, 0x01, 0x01], &VALID_UDP);
-        let ip = Ipv4Packet::new(&bytes).expect("failed to parse IPv4 packet with options");
+        let ip = Ipv4Packet::from_packet(&bytes).expect("failed to parse IPv4 packet with options");
 
-        let packet = UDPPacket::new(&ip).expect("options do not change the UDP datagram");
+        let packet = UDPPacket::from_packet(&ip).expect("options do not change the UDP datagram");
 
         assert_eq!(packet.datagram_length, 12);
         assert_eq!(packet.data, &PAYLOAD);
@@ -267,9 +294,10 @@ mod tests {
         datagram[6..8].copy_from_slice(&[0x0, 0x0]); // sender opted out of checksumming
 
         let bytes = ipv4_wrap(SRC, DST, &datagram);
-        let ip = Ipv4Packet::new(&bytes).expect("failed to parse valid IPv4 packet");
+        let ip = Ipv4Packet::from_packet(&bytes).expect("failed to parse valid IPv4 packet");
 
-        let packet = UDPPacket::new(&ip).expect("a zero checksum means unchecked, not invalid");
+        let packet =
+            UDPPacket::from_packet(&ip).expect("a zero checksum means unchecked, not invalid");
 
         assert_eq!(packet.checksum, 0);
         assert_eq!(packet.data, &PAYLOAD);
@@ -281,9 +309,12 @@ mod tests {
         datagram[8] ^= 0xff; // corrupt the payload, leaving a now stale checksum
 
         let bytes = ipv4_wrap(SRC, DST, &datagram);
-        let ip = Ipv4Packet::new(&bytes).expect("failed to parse valid IPv4 packet");
+        let ip = Ipv4Packet::from_packet(&bytes).expect("failed to parse valid IPv4 packet");
 
-        assert_eq!(UDPPacket::new(&ip).err(), Some(UDPError::IncorrectChecksum));
+        assert_eq!(
+            UDPPacket::from_packet(&ip).err(),
+            Some(UDPError::IncorrectChecksum)
+        );
     }
 
     #[test]
@@ -292,9 +323,12 @@ mod tests {
         datagram[7] ^= 0x01; // the datagram is intact, the checksum itself is not
 
         let bytes = ipv4_wrap(SRC, DST, &datagram);
-        let ip = Ipv4Packet::new(&bytes).expect("failed to parse valid IPv4 packet");
+        let ip = Ipv4Packet::from_packet(&bytes).expect("failed to parse valid IPv4 packet");
 
-        assert_eq!(UDPPacket::new(&ip).err(), Some(UDPError::IncorrectChecksum));
+        assert_eq!(
+            UDPPacket::from_packet(&ip).err(),
+            Some(UDPError::IncorrectChecksum)
+        );
     }
 
     #[test]
@@ -304,9 +338,12 @@ mod tests {
         let datagram = build_udp(SRC, Ipv4Addr::new(10, 0, 0, 2), 0x1234, 0x5678, &PAYLOAD);
 
         let bytes = ipv4_wrap(SRC, DST, &datagram);
-        let ip = Ipv4Packet::new(&bytes).expect("failed to parse valid IPv4 packet");
+        let ip = Ipv4Packet::from_packet(&bytes).expect("failed to parse valid IPv4 packet");
 
-        assert_eq!(UDPPacket::new(&ip).err(), Some(UDPError::IncorrectChecksum));
+        assert_eq!(
+            UDPPacket::from_packet(&ip).err(),
+            Some(UDPError::IncorrectChecksum)
+        );
     }
 
     #[test]
@@ -318,9 +355,12 @@ mod tests {
         fill_checksum(&mut datagram, SRC, DST);
 
         let bytes = ipv4_wrap(SRC, DST, &datagram);
-        let ip = Ipv4Packet::new(&bytes).expect("failed to parse valid IPv4 packet");
+        let ip = Ipv4Packet::from_packet(&bytes).expect("failed to parse valid IPv4 packet");
 
-        assert_eq!(UDPPacket::new(&ip).err(), Some(UDPError::LengthMismatch));
+        assert_eq!(
+            UDPPacket::from_packet(&ip).err(),
+            Some(UDPError::LengthMismatch)
+        );
     }
 
     #[test]
@@ -332,9 +372,12 @@ mod tests {
         fill_checksum(&mut datagram, SRC, DST);
 
         let bytes = ipv4_wrap(SRC, DST, &datagram);
-        let ip = Ipv4Packet::new(&bytes).expect("failed to parse valid IPv4 packet");
+        let ip = Ipv4Packet::from_packet(&bytes).expect("failed to parse valid IPv4 packet");
 
-        assert_eq!(UDPPacket::new(&ip).err(), Some(UDPError::LengthMismatch));
+        assert_eq!(
+            UDPPacket::from_packet(&ip).err(),
+            Some(UDPError::LengthMismatch)
+        );
     }
 
     #[test]
@@ -344,9 +387,12 @@ mod tests {
         fill_checksum(&mut datagram, SRC, DST);
 
         let bytes = ipv4_wrap(SRC, DST, &datagram);
-        let ip = Ipv4Packet::new(&bytes).expect("failed to parse valid IPv4 packet");
+        let ip = Ipv4Packet::from_packet(&bytes).expect("failed to parse valid IPv4 packet");
 
-        assert_eq!(UDPPacket::new(&ip).err(), Some(UDPError::LengthMismatch));
+        assert_eq!(
+            UDPPacket::from_packet(&ip).err(),
+            Some(UDPError::LengthMismatch)
+        );
     }
 
     #[test]
@@ -358,19 +404,23 @@ mod tests {
         datagram[8] ^= 0xff;
 
         let bytes = ipv4_wrap(SRC, DST, &datagram);
-        let ip = Ipv4Packet::new(&bytes).expect("failed to parse valid IPv4 packet");
+        let ip = Ipv4Packet::from_packet(&bytes).expect("failed to parse valid IPv4 packet");
 
-        assert_eq!(UDPPacket::new(&ip).err(), Some(UDPError::LengthMismatch));
+        assert_eq!(
+            UDPPacket::from_packet(&ip).err(),
+            Some(UDPError::LengthMismatch)
+        );
     }
 
     #[test]
     fn test_udp_parse_rejects_truncated_header() {
         for len in [1, 4, 7] {
             let bytes = ipv4_wrap(SRC, DST, &VALID_UDP[..len]);
-            let ip = Ipv4Packet::new(&bytes).expect("the IPv4 wrapper is still well formed");
+            let ip =
+                Ipv4Packet::from_packet(&bytes).expect("the IPv4 wrapper is still well formed");
 
             assert_eq!(
-                UDPPacket::new(&ip).err(),
+                UDPPacket::from_packet(&ip).err(),
                 Some(UDPError::LengthOutOfRange),
                 "{len} bytes is shorter than the 8 byte UDP header"
             );
@@ -383,10 +433,11 @@ mod tests {
         // minimum size derived from the IPv4 total length does not bound the payload.
         for len in [1, 4, 7] {
             let bytes = ipv4_wrap_with_options(SRC, DST, &[0x01; 4], &VALID_UDP[..len]);
-            let ip = Ipv4Packet::new(&bytes).expect("the IPv4 wrapper is still well formed");
+            let ip =
+                Ipv4Packet::from_packet(&bytes).expect("the IPv4 wrapper is still well formed");
 
             assert_eq!(
-                UDPPacket::new(&ip).err(),
+                UDPPacket::from_packet(&ip).err(),
                 Some(UDPError::LengthOutOfRange),
                 "{len} bytes is shorter than the 8 byte UDP header"
             );
@@ -396,9 +447,111 @@ mod tests {
     #[test]
     fn test_udp_parse_rejects_empty_ip_payload() {
         let bytes = ipv4_wrap(SRC, DST, &[]);
-        let ip = Ipv4Packet::new(&bytes).expect("an IPv4 packet with no payload is well formed");
+        let ip =
+            Ipv4Packet::from_packet(&bytes).expect("an IPv4 packet with no payload is well formed");
 
-        assert_eq!(UDPPacket::new(&ip).err(), Some(UDPError::LengthOutOfRange));
+        assert_eq!(
+            UDPPacket::from_packet(&ip).err(),
+            Some(UDPError::LengthOutOfRange)
+        );
+    }
+
+    #[test]
+    fn test_udp_new_sets_header_fields() {
+        let packet = UDPPacket::new(0x1234, 0x5678, &PAYLOAD).expect("a 4 byte payload fits");
+
+        assert_eq!(packet.source_port, 0x1234);
+        assert_eq!(packet.dest_port, 0x5678);
+        assert_eq!(packet.data, &PAYLOAD);
+        // The length field covers the header as well as the payload.
+        assert_eq!(packet.datagram_length, 12);
+        // There is nothing to checksum until an address pair is known, so the
+        // checksum stays zero until serialization computes it.
+        assert_eq!(packet.checksum, 0);
+    }
+
+    #[test]
+    fn test_udp_new_empty_payload() {
+        let packet = UDPPacket::new(0x1234, 0x5678, &[]).expect("an empty payload is valid");
+
+        assert_eq!(packet.datagram_length, 8);
+        assert_eq!(packet.data, &[]);
+    }
+
+    #[test]
+    fn test_udp_new_max_payload() {
+        let payload = vec![0x41; MAX_UDP_PAYLOAD];
+
+        let packet = UDPPacket::new(0x1234, 0x5678, &payload)
+            .expect("the largest payload that fits the length field is valid");
+
+        assert_eq!(packet.datagram_length, u16::MAX);
+    }
+
+    #[test]
+    fn test_udp_new_rejects_oversized_payload() {
+        // One byte past the largest payload whose datagram length still fits a u16.
+        let payload = vec![0x41; MAX_UDP_PAYLOAD + 1];
+
+        assert_eq!(
+            UDPPacket::new(0x1234, 0x5678, &payload).err(),
+            Some(UDPError::LengthOutOfRange)
+        );
+    }
+
+    #[test]
+    fn test_udp_new_rejects_payload_overflowing_length_field() {
+        // A payload past the length field's own range must be rejected rather than
+        // wrapped around into a small, plausible looking length.
+        let payload = vec![0x41; u16::MAX as usize + 1];
+
+        assert_eq!(
+            UDPPacket::new(0x1234, 0x5678, &payload).err(),
+            Some(UDPError::LengthOutOfRange)
+        );
+    }
+
+    #[test]
+    fn test_udp_new_serializes_to_capture() {
+        // The constructor and the serializer together reproduce the known-good wire
+        // bytes, using only the public API.
+        let packet = UDPPacket::new(0x1234, 0x5678, &PAYLOAD).expect("a 4 byte payload fits");
+
+        assert_eq!(
+            packet
+                .serialize_ipv4(&SRC, &DST)
+                .expect("failed to serialize a 4 byte payload"),
+            &VALID_UDP[..]
+        );
+
+        let empty = UDPPacket::new(0x1234, 0x5678, &[]).expect("an empty payload is valid");
+
+        assert_eq!(
+            empty
+                .serialize_ipv4(&SRC, &DST)
+                .expect("failed to serialize an empty payload"),
+            &VALID_UDP_EMPTY[..]
+        );
+    }
+
+    #[test]
+    fn test_udp_new_round_trip() {
+        let packet = UDPPacket::new(0xabcd, 0x0035, &PAYLOAD).expect("a 4 byte payload fits");
+
+        let datagram = packet
+            .serialize_ipv4(&SRC, &DST)
+            .expect("failed to serialize a 4 byte payload");
+
+        let bytes = ipv4_wrap(SRC, DST, &datagram);
+        let ip = Ipv4Packet::from_packet(&bytes).expect("failed to parse valid IPv4 packet");
+
+        let parsed = UDPPacket::from_packet(&ip).expect("a constructed datagram should parse back");
+
+        assert_eq!(parsed.source_port, 0xabcd);
+        assert_eq!(parsed.dest_port, 0x0035);
+        assert_eq!(parsed.data, &PAYLOAD);
+        // The length the constructor computed is the one that reaches the receiver.
+        assert_eq!(parsed.datagram_length, packet.datagram_length);
     }
 
     #[test]
@@ -501,9 +654,9 @@ mod tests {
             .expect("failed to serialize a 4 byte payload");
 
         let bytes = ipv4_wrap(SRC, DST, &datagram);
-        let ip = Ipv4Packet::new(&bytes).expect("failed to parse valid IPv4 packet");
+        let ip = Ipv4Packet::from_packet(&bytes).expect("failed to parse valid IPv4 packet");
 
-        let parsed = UDPPacket::new(&ip).expect("a serialized datagram should parse back");
+        let parsed = UDPPacket::from_packet(&ip).expect("a serialized datagram should parse back");
 
         assert_eq!(parsed.source_port, 0xabcd);
         assert_eq!(parsed.dest_port, 0x0035);

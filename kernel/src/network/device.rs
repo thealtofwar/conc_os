@@ -2,9 +2,9 @@ use spin::Once;
 use virtio_drivers::{
     device::net::VirtIONet,
     transport::{
-        DeviceType, Transport,
+        DeviceType,
         pci::{
-            PciTransport, VIRTIO_VENDOR_ID, VirtioPciError,
+            PciTransport, VirtioPciError,
             bus::{DeviceFunction, PciRoot},
         },
     },
@@ -14,7 +14,7 @@ use crate::{
     apic::route_pci_interrupt,
     interrupts::VIRTIO_NET_VECTOR,
     mutex::InterruptMutex,
-    pci::{PortCam, pci_read_u32},
+    pci::{PortCam, pci_read_u32, virtio_type_at},
     println,
     virtio::KernelHal,
 };
@@ -28,30 +28,28 @@ pub fn get_net_driver() -> &'static InterruptMutex<VirtioNetDriver> {
 }
 
 enum DeviceErr {
-    NotNetwork(DeviceType),
     FailedInit(virtio_drivers::Error),
     VirtioError(VirtioPciError),
 }
 
+/// Brings up the network card at `device_function`.
+///
+/// The caller must have already established that this function *is* a network
+/// card. Building a transport for anything else and dropping it resets that
+/// device.
 fn init_net_from_df(
     root: &mut PciRoot<PortCam>,
     device_function: &DeviceFunction,
 ) -> Result<(), DeviceErr> {
     match PciTransport::new::<KernelHal, _>(root, *device_function) {
-        Ok(transport) => {
-            if transport.device_type() != DeviceType::Network {
-                return Err(DeviceErr::NotNetwork(transport.device_type()));
+        Ok(transport) => match VirtIONet::new(transport, 16384) {
+            Ok(mut driver) => {
+                driver.enable_interrupts();
+                VIRTIO_NET.call_once(|| InterruptMutex::new(driver));
+                Ok(())
             }
-
-            match VirtIONet::new(transport, 16384) {
-                Ok(mut driver) => {
-                    driver.enable_interrupts();
-                    VIRTIO_NET.call_once(|| InterruptMutex::new(driver));
-                    Ok(())
-                }
-                Err(err) => Err(DeviceErr::FailedInit(err)),
-            }
-        }
+            Err(err) => Err(DeviceErr::FailedInit(err)),
+        },
         Err(err) => Err(DeviceErr::VirtioError(err)),
     }
 }
@@ -66,8 +64,9 @@ pub fn init_virtio_net_pci() -> bool {
     for bus in 0..=255 {
         for device in 0..32 {
             for function in 0..8 {
-                let vendor = pci_read_u32(bus, device, function, 0) as u16;
-                if vendor != VIRTIO_VENDOR_ID {
+                // Devices of other types are skipped without a transport ever
+                // being built for them, so probing here cannot disturb them.
+                if virtio_type_at(bus, device, function) != Some(DeviceType::Network) {
                     continue;
                 }
 
@@ -90,12 +89,6 @@ pub fn init_virtio_net_pci() -> bool {
                         println!("VirtIO: interrupt line={} pin={}", gsi, pin);
                         route_pci_interrupt(gsi, VIRTIO_NET_VECTOR);
                         return true;
-                    }
-                    Err(DeviceErr::NotNetwork(dtype)) => {
-                        println!(
-                            "virtio device at {:02x}:{:02x}.{} is {:?}, skipping",
-                            bus, device, function, dtype
-                        );
                     }
                     Err(DeviceErr::FailedInit(err)) => {
                         println!(

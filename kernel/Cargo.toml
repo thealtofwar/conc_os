@@ -28,7 +28,15 @@ futures-util = { version = "0.3.4", default-features = false, features = ["alloc
 conc_os_net = { path = "../net" }
 
 [package.metadata.bootimage]
-run-command = ["qemu-system-x86_64", "-d", "int", "-accel", "whpx,kernel-irqchip=off", "-machine", "pc", "-drive", "format=raw,file={}", "-device", "virtio-net-pci,netdev=net0", "-netdev", "user,id=net0"]
+run-command = [
+    "qemu-system-x86_64", "-d", "int", "-accel", "whpx,kernel-irqchip=off", "-machine", "pc", "-drive", "format=raw,file={}", 
+
+    "-device", "virtio-net-pci,netdev=net0", "-netdev", "user,id=net0", 
+
+    "-object", "filter-dump,id=dump0,netdev=net0,file=network.pcap",
+
+    "-device", "virtio-rng-pci"
+]
 
 [[bin]]
 name = "conc_os"

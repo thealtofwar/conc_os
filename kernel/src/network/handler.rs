@@ -3,17 +3,15 @@ use crate::{network::device::get_net_driver, println};
 use alloc::borrow::ToOwned;
 use alloc::vec;
 use conc_os_net::arp::{ArpCache, ArpOperation, ArpPacket, Queued};
+use conc_os_net::dhcp::{self, DHCPOffer};
 use conc_os_net::ethernet::{EtherType, EthernetFrame, MacAddress};
 use conc_os_net::ipv4::{IPProtocol, Ipv4Error, Ipv4Packet, internet_checksum};
 use conc_os_net::udp::{UDPError, UDPPacket};
-use conc_os_net::utils::FromSlice;
 use core::net::Ipv4Addr;
 use spin::{Mutex, Once};
 use virtio_drivers::device::net::TxBuffer;
 
 static NETWORK_INTERFACE: Once<Mutex<NetworkInterface>> = Once::new();
-const DHCP_FIXED_LEN: usize = 240;
-const DHCP_MAGIC_COOKIE: [u8; 4] = [0x63, 0x82, 0x53, 0x63];
 
 pub fn get_network_interface() -> &'static Mutex<NetworkInterface> {
     NETWORK_INTERFACE
@@ -46,8 +44,6 @@ pub enum DHCPError {
     UDPError(UDPError),
     IPv4Error(Ipv4Error),
     AlreadyStarted,
-    InvalidTLV,
-    MissingData,
 }
 
 pub struct NetworkInterface {
@@ -298,30 +294,14 @@ impl NetworkInterface {
             return Err(DHCPError::AlreadyStarted);
         }
 
-        let mut data = [0u8; 300];
-
         let xid = u32::from_rand().map_err(DHCPError::RNGError)?;
 
-        // op, hardware type, hardware addr len, hops
-        data[0..4].copy_from_slice(&[1, 1, 6, 0]);
-        // random xid
-        data[4..8].copy_from_slice(&xid.to_ne_bytes());
-        //  [8..10] is seconds since first transmission, we leave this at 0
-        data[10..12].copy_from_slice(&0x8000u16.to_be_bytes()); // broadcast flags
-        //  [12..28] are ip addresses which we don't know, we leave them at 0
-        data[28..34].copy_from_slice(&self.mac.addr);
-        //  [34..44] is padding for the hardware address
-        //  [44..108] is the server name field, leave at 0
-        //  [108..236] is the file field, leave at 0
-        // dhcp magic cookie
-        data[236..240].copy_from_slice(&0x63825363u32.to_be_bytes());
-
-        // dhcp type, length, values, then 0xff
-        data[240..248].copy_from_slice(&[53, 1, 1, 55, 2, 1, 3, 0xff]);
+        let data = dhcp::build_discover(self.mac, xid);
 
         let id = u16::from_rand().map_err(DHCPError::RNGError)?;
 
-        let datagram = UDPPacket::new(68, 67, &data).map_err(DHCPError::UDPError)?;
+        let datagram = UDPPacket::new(dhcp::CLIENT_PORT, dhcp::SERVER_PORT, &data)
+            .map_err(DHCPError::UDPError)?;
 
         let source = Ipv4Addr::UNSPECIFIED; // we don't know our IP address right now
         let dest = Ipv4Addr::BROADCAST;
@@ -342,109 +322,32 @@ impl NetworkInterface {
 
     pub fn handle_udp(&mut self, datagram: UDPPacket) {
         if let Some(xid) = self.initializing_dhcp_xid
-            && datagram.dest_port() == 68
-            && datagram.source_port() == 67
+            && datagram.dest_port() == dhcp::CLIENT_PORT
+            && datagram.source_port() == dhcp::SERVER_PORT
         {
             self.handle_dhcp(datagram, xid);
         }
     }
 
-    /// returns Ok((gateway, subnet_mask))
-    fn parse_tlv(
-        &self,
-        end: &[u8],
-        dhcp_packet_type: u8,
-    ) -> Result<(Ipv4Addr, Ipv4Addr), DHCPError> {
-        let mut seen_opt_53 = false;
-        let mut gateway: Option<Ipv4Addr> = None;
-        let mut subnet_mask: Option<Ipv4Addr> = None;
-
-        let mut cur = 0;
-        while (cur + 1) < end.len() {
-            let tag = end[cur];
-            let len = end[cur + 1] as usize;
-
-            if cur + len + 2 > end.len() {
-                return Err(DHCPError::InvalidTLV);
-            }
-
-            let data = &end[cur + 2..cur + len + 2];
-
-            match tag {
-                1 => {
-                    if len != 4 {
-                        return Err(DHCPError::InvalidTLV);
-                    }
-
-                    subnet_mask = Some(Ipv4Addr::from_octets(
-                        data[0..4].try_into().expect("correct len"),
-                    ));
-                }
-                3 => {
-                    if len != 4 {
-                        return Err(DHCPError::InvalidTLV);
-                    }
-
-                    gateway = Some(Ipv4Addr::from_octets(
-                        data[0..4].try_into().expect("correct len"),
-                    ));
-                }
-                53 => {
-                    if len != 1 || end[cur + 2] != dhcp_packet_type {
-                        return Err(DHCPError::InvalidTLV);
-                    }
-                    seen_opt_53 = true;
-                }
-                255 => {
-                    if seen_opt_53
-                        && let Some(gateway) = gateway
-                        && let Some(subnet_mask) = subnet_mask
-                    {
-                        return Ok((gateway, subnet_mask));
-                    }
-                    return Err(DHCPError::MissingData);
-                }
-                _ => {}
-            }
-            // 2 for tag-len, then the value
-            cur += 2 + len;
-        }
-        Err(DHCPError::InvalidTLV)
-    }
-
     fn handle_dhcp(&mut self, packet: UDPPacket, xid: u32) {
-        if packet.len() < DHCP_FIXED_LEN {
-            return;
-        }
-
-        let msg = packet.data();
-
-        if msg[0..3] != [2, 1, 6] || msg[236..240] != DHCP_MAGIC_COOKIE {
-            return;
-        }
-
-        if u32::from_ne_slice(&msg[4..8]) != xid {
-            return;
-        }
-
-        if msg[28..34] != self.mac.addr || msg[34..40] != [0u8; 6] {
-            return;
-        }
-
-        let Ok((gateway, subnet_mask)) = self.parse_tlv(&msg[240..], 2) else {
-            return;
+        let offer = match DHCPOffer::from_message(packet.data(), xid, self.mac) {
+            Ok(offer) => offer,
+            // Offers are broadcast, so an exchange that is not ours is the
+            // ordinary case and not worth reporting.
+            Err(dhcp::DHCPError::XidMismatch | dhcp::DHCPError::ClientMacMismatch) => return,
+            Err(e) => {
+                println!("ignoring DHCP reply: {e:?}");
+                return;
+            }
         };
 
-        self.gateway = Some(gateway);
-        self.subnet_mask = Some(subnet_mask);
-        self.ipv4 = Some(Ipv4Addr::from_octets(
-            msg[16..20].try_into().expect("right length"),
-        ));
+        self.ipv4 = Some(offer.offered_addr);
+        self.subnet_mask = Some(offer.subnet_mask);
+        self.gateway = Some(offer.gateway);
+
         println!(
             "got ip addr {}, mask {}, gw {}",
-            self.ipv4.unwrap(),
-            self.subnet_mask.unwrap(),
-            self.gateway.unwrap()
+            offer.offered_addr, offer.subnet_mask, offer.gateway
         );
     }
 }

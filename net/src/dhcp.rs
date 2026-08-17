@@ -19,9 +19,9 @@ pub const SERVER_PORT: u16 = 67;
 pub const FIXED_LEN: usize = 240;
 
 /// BOOTP relays and older servers may drop anything shorter than a 300 byte
-/// message, so a discover is padded out to that length rather than ending after
-/// its options.
-pub const DISCOVER_LEN: usize = 300;
+/// message, so every message we build is padded out to that length rather than
+/// ending after its options.
+pub const MESSAGE_LEN: usize = 300;
 
 const MAGIC_COOKIE: [u8; 4] = [0x63, 0x82, 0x53, 0x63];
 
@@ -46,9 +46,15 @@ const COOKIE: Range<usize> = 236..240;
 const OPT_PAD: u8 = 0;
 const OPT_SUBNET_MASK: u8 = 1;
 const OPT_ROUTER: u8 = 3;
+const OPT_REQUESTED_ADDR: u8 = 50;
 const OPT_MESSAGE_TYPE: u8 = 53;
+const OPT_SERVER_ID: u8 = 54;
 const OPT_PARAMETER_REQUEST_LIST: u8 = 55;
 const OPT_END: u8 = 255;
+
+/// The options a client asks a server to fill in. Both messages we build carry
+/// it, since the request is what the server answers with a full configuration.
+const PARAMETER_REQUEST: [u8; 4] = [OPT_PARAMETER_REQUEST_LIST, 2, OPT_SUBNET_MASK, OPT_ROUTER];
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum DHCPError {
@@ -100,12 +106,11 @@ impl TryFrom<u8> for DHCPMessageType {
     }
 }
 
-/// Builds the DHCPDISCOVER a client broadcasts to open an exchange.
-///
-/// `xid` identifies the exchange: it is opaque, and is only ever compared
-/// against the copy a server echoes back.
-pub fn build_discover(client_mac: MacAddress, xid: u32) -> [u8; DISCOVER_LEN] {
-    let mut msg = [0u8; DISCOVER_LEN];
+/// Lays down the header both of the messages we send share, and appends
+/// `options` to it. Everything a client sends is a BOOTREQUEST from an address
+/// it does not hold yet, so only the options tell the two apart.
+fn build_message(client_mac: MacAddress, xid: u32, options: &[u8]) -> [u8; MESSAGE_LEN] {
+    let mut msg = [0u8; MESSAGE_LEN];
 
     msg[0] = OP_BOOT_REQUEST;
     msg[1] = HTYPE_ETHERNET;
@@ -115,31 +120,67 @@ pub fn build_discover(client_mac: MacAddress, xid: u32) -> [u8; DISCOVER_LEN] {
     msg[XID].copy_from_slice(&xid.to_be_bytes());
     msg[FLAGS].copy_from_slice(&FLAG_BROADCAST.to_be_bytes());
     // [12..28] are addresses we do not know yet, and [44..236] name a boot
-    // server and file we do not want.
+    // server and file we do not want. In particular ciaddr stays zero: an
+    // address only goes there once the client holds a lease on it.
     msg[CHADDR.start..CHADDR.start + 6].copy_from_slice(&client_mac.addr);
     msg[COOKIE].copy_from_slice(&MAGIC_COOKIE);
 
-    msg[FIXED_LEN..FIXED_LEN + 8].copy_from_slice(&[
-        OPT_MESSAGE_TYPE,
-        1,
-        DHCPMessageType::Discover as u8,
-        OPT_PARAMETER_REQUEST_LIST,
-        2,
-        OPT_SUBNET_MASK,
-        OPT_ROUTER,
-        OPT_END,
-    ]);
-    // The remainder is the padding that brings the message up to DISCOVER_LEN.
+    msg[FIXED_LEN..FIXED_LEN + options.len()].copy_from_slice(options);
+    // The remainder is the padding that brings the message up to MESSAGE_LEN.
 
     msg
 }
 
-/// The parts of a DHCPOFFER a client needs to configure an interface.
+/// Builds the DHCPDISCOVER a client broadcasts to open an exchange.
+///
+/// `xid` identifies the exchange: it is opaque, and is only ever compared
+/// against the copy a server echoes back.
+pub fn build_discover(client_mac: MacAddress, xid: u32) -> [u8; MESSAGE_LEN] {
+    let mut options = [0u8; 3 + PARAMETER_REQUEST.len() + 1];
+
+    options[..3].copy_from_slice(&[OPT_MESSAGE_TYPE, 1, DHCPMessageType::Discover as u8]);
+    options[3..3 + PARAMETER_REQUEST.len()].copy_from_slice(&PARAMETER_REQUEST);
+    options[3 + PARAMETER_REQUEST.len()] = OPT_END;
+
+    build_message(client_mac, xid, &options)
+}
+
+/// Builds the DHCPREQUEST that accepts `offer`, under the `xid` the offer
+/// answered.
+///
+/// The request is broadcast rather than sent to the server that made the offer:
+/// it is how the servers whose offers we are declining learn to release the
+/// addresses they set aside. Which one we accepted is named by the server
+/// identifier option, and the address by the requested address option, since
+/// the client has no lease to put in ciaddr yet.
+pub fn build_request(client_mac: MacAddress, xid: u32, offer: &DHCPBinding) -> [u8; MESSAGE_LEN] {
+    let mut options = [0u8; 3 + 6 + 6 + PARAMETER_REQUEST.len() + 1];
+
+    options[..3].copy_from_slice(&[OPT_MESSAGE_TYPE, 1, DHCPMessageType::Request as u8]);
+
+    options[3..5].copy_from_slice(&[OPT_REQUESTED_ADDR, 4]);
+    options[5..9].copy_from_slice(&offer.client_addr.octets());
+
+    options[9..11].copy_from_slice(&[OPT_SERVER_ID, 4]);
+    options[11..15].copy_from_slice(&offer.server_id.octets());
+
+    options[15..15 + PARAMETER_REQUEST.len()].copy_from_slice(&PARAMETER_REQUEST);
+    options[15 + PARAMETER_REQUEST.len()] = OPT_END;
+
+    build_message(client_mac, xid, &options)
+}
+
+/// The configuration a server binds to a client: proposed by a DHCPOFFER, and
+/// committed by the DHCPACK that closes the exchange.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub struct DHCPOffer {
-    pub offered_addr: Ipv4Addr,
+pub struct DHCPBinding {
+    pub client_addr: Ipv4Addr,
     pub subnet_mask: Ipv4Addr,
     pub gateway: Ipv4Addr,
+    /// The server that sent this, by the address it identifies itself with.
+    /// Several may answer a discover, and the request has to name the one whose
+    /// offer it takes.
+    pub server_id: Ipv4Addr,
 }
 
 /// Options recognised while parsing. Absent is distinct from malformed: a
@@ -149,16 +190,35 @@ struct Options {
     message_type: Option<DHCPMessageType>,
     subnet_mask: Option<Ipv4Addr>,
     router: Option<Ipv4Addr>,
+    server_id: Option<Ipv4Addr>,
 }
 
-impl DHCPOffer {
-    /// Reads an offer out of a DHCP message.
+impl DHCPBinding {
+    /// Reads the configuration a server is offering.
     ///
     /// `xid` and `client_mac` are the ones the discover went out with. A server
     /// answering a different exchange, or a different client, is rejected here
     /// rather than being allowed to configure this interface: the reply arrives
     /// by broadcast, so other clients' offers reach us too.
-    pub fn from_message(msg: &[u8], xid: u32, client_mac: MacAddress) -> Result<Self, DHCPError> {
+    pub fn from_offer(msg: &[u8], xid: u32, client_mac: MacAddress) -> Result<Self, DHCPError> {
+        Self::from_message(msg, xid, client_mac, DHCPMessageType::Offer)
+    }
+
+    /// Reads the configuration a server has committed to.
+    ///
+    /// An acknowledgement is the last message of the exchange, and it is what
+    /// the client configures itself from: a server may bind something other
+    /// than what it offered, so the request is not what settles this.
+    pub fn from_ack(msg: &[u8], xid: u32, client_mac: MacAddress) -> Result<Self, DHCPError> {
+        Self::from_message(msg, xid, client_mac, DHCPMessageType::Ack)
+    }
+
+    fn from_message(
+        msg: &[u8],
+        xid: u32,
+        client_mac: MacAddress,
+        expected: DHCPMessageType,
+    ) -> Result<Self, DHCPError> {
         if msg.len() < FIXED_LEN {
             return Err(DHCPError::TooShort);
         }
@@ -186,26 +246,29 @@ impl DHCPOffer {
 
         let options = parse_options(&msg[FIXED_LEN..])?;
 
-        if options.message_type != Some(DHCPMessageType::Offer) {
+        if options.message_type != Some(expected) {
             return Err(DHCPError::WrongMessageType);
         }
 
-        let (Some(subnet_mask), Some(gateway)) = (options.subnet_mask, options.router) else {
+        let (Some(subnet_mask), Some(gateway), Some(server_id)) =
+            (options.subnet_mask, options.router, options.server_id)
+        else {
             return Err(DHCPError::MissingData);
         };
 
-        let offered_addr =
+        let client_addr =
             Ipv4Addr::from_octets(msg[YIADDR].try_into().expect("yiaddr is a four byte field"));
 
-        // An offer of the unspecified address offers nothing.
-        if offered_addr.is_unspecified() {
+        // A binding of the unspecified address binds nothing.
+        if client_addr.is_unspecified() {
             return Err(DHCPError::MissingData);
         }
 
         Ok(Self {
-            offered_addr,
+            client_addr,
             subnet_mask,
             gateway,
+            server_id,
         })
     }
 }
@@ -250,6 +313,7 @@ fn parse_options(options: &[u8]) -> Result<Options, DHCPError> {
 
                 parsed.router = Some(parse_addr(&value[..4])?);
             }
+            OPT_SERVER_ID => parsed.server_id = Some(parse_addr(value)?),
             OPT_MESSAGE_TYPE => {
                 parsed.message_type = Some(
                     value
@@ -359,16 +423,37 @@ mod tests {
         255,
     ];
 
-    /// Builds an offer around `options`, so that a test can vary the options
-    /// without restating the header.
+    /// The binding the capture's server offered.
+    const CAPTURE_BINDING: DHCPBinding = DHCPBinding {
+        client_addr: Ipv4Addr::new(10, 0, 2, 15),
+        subnet_mask: Ipv4Addr::new(255, 255, 255, 0),
+        gateway: Ipv4Addr::new(10, 0, 2, 2),
+        server_id: Ipv4Addr::new(10, 0, 2, 2),
+    };
+
+    /// Builds a reply around `options`, so that a test can vary the options
+    /// without restating the header. Offers and acknowledgements share it.
     fn offer_with(options: &[u8]) -> Vec<u8> {
         let mut msg = OFFER[..FIXED_LEN].to_vec();
         msg.extend_from_slice(options);
         msg
     }
 
-    fn parse(msg: &[u8]) -> Result<DHCPOffer, DHCPError> {
-        DHCPOffer::from_message(msg, CAPTURE_XID, CLIENT_MAC)
+    /// The capture's offer, as the acknowledgement of the same binding. The
+    /// exchange past the offer was not captured, and the two messages differ
+    /// only in this option.
+    fn ack_from_capture() -> Vec<u8> {
+        let mut msg = OFFER.to_vec();
+        msg[FIXED_LEN + 2] = DHCPMessageType::Ack as u8;
+        msg
+    }
+
+    fn parse(msg: &[u8]) -> Result<DHCPBinding, DHCPError> {
+        DHCPBinding::from_offer(msg, CAPTURE_XID, CLIENT_MAC)
+    }
+
+    fn parse_ack(msg: &[u8]) -> Result<DHCPBinding, DHCPError> {
+        DHCPBinding::from_ack(msg, CAPTURE_XID, CLIENT_MAC)
     }
 
     #[test]
@@ -382,7 +467,7 @@ mod tests {
 
         // Everything past the options is padding, and the options themselves
         // end well before the message does.
-        assert_eq!(msg.len(), DISCOVER_LEN);
+        assert_eq!(msg.len(), MESSAGE_LEN);
         assert_eq!(msg[FIXED_LEN + 7], OPT_END);
         assert!(msg[FIXED_LEN + 8..].iter().all(|byte| *byte == 0));
     }
@@ -407,16 +492,128 @@ mod tests {
     }
 
     #[test]
+    fn test_build_request_options() {
+        let msg = build_request(CLIENT_MAC, CAPTURE_XID, &CAPTURE_BINDING);
+
+        assert_eq!(
+            msg[FIXED_LEN..FIXED_LEN + 20],
+            [
+                53, 1, 3, // request
+                50, 4, 10, 0, 2, 15, // the address the offer proposed
+                54, 4, 10, 0, 2, 2, // the server that proposed it
+                55, 2, 1, 3, // subnet mask and router, as the discover asked
+                255,
+            ]
+        );
+        assert!(msg[FIXED_LEN + 20..].iter().all(|byte| *byte == 0));
+    }
+
+    #[test]
+    fn test_build_request_shares_the_discover_header() {
+        // Both are a BOOTREQUEST from this client under this exchange id, with
+        // the same broadcast flag; only the options differ.
+        let request = build_request(CLIENT_MAC, CAPTURE_XID, &CAPTURE_BINDING);
+
+        assert_eq!(request[..FIXED_LEN], DISCOVER[..FIXED_LEN]);
+    }
+
+    #[test]
+    fn test_build_request_leaves_ciaddr_unset() {
+        // The client does not hold the address yet, so it goes in an option and
+        // not in the field that means "this is mine".
+        let msg = build_request(CLIENT_MAC, CAPTURE_XID, &CAPTURE_BINDING);
+
+        assert_eq!(msg[12..16], [0u8; 4]);
+        assert_eq!(msg[YIADDR], [0u8; 4]);
+    }
+
+    #[test]
+    fn test_build_request_names_the_offer_it_accepts() {
+        // A second server's offer must produce a request naming that server and
+        // that address, or the wrong lease is taken up.
+        let other = DHCPBinding {
+            client_addr: Ipv4Addr::new(192, 168, 1, 50),
+            subnet_mask: Ipv4Addr::new(255, 255, 0, 0),
+            gateway: Ipv4Addr::new(192, 168, 1, 1),
+            server_id: Ipv4Addr::new(192, 168, 1, 254),
+        };
+
+        let msg = build_request(CLIENT_MAC, CAPTURE_XID, &other);
+
+        assert_eq!(msg[FIXED_LEN + 3..FIXED_LEN + 5], [OPT_REQUESTED_ADDR, 4]);
+        assert_eq!(
+            msg[FIXED_LEN + 5..FIXED_LEN + 9],
+            other.client_addr.octets()
+        );
+        assert_eq!(msg[FIXED_LEN + 9..FIXED_LEN + 11], [OPT_SERVER_ID, 4]);
+        assert_eq!(
+            msg[FIXED_LEN + 11..FIXED_LEN + 15],
+            other.server_id.octets()
+        );
+    }
+
+    #[test]
+    fn test_build_request_is_not_a_reply() {
+        // Our own request, looped back: it is a BOOTREQUEST, so it can never be
+        // mistaken for the acknowledgement we are waiting for.
+        let msg = build_request(CLIENT_MAC, CAPTURE_XID, &CAPTURE_BINDING);
+
+        assert_eq!(parse_ack(&msg), Err(DHCPError::NotAReply));
+    }
+
+    #[test]
     fn test_parse_offer_from_capture() {
         let offer = parse(&OFFER).expect("failed to parse a captured offer");
 
+        assert_eq!(offer, CAPTURE_BINDING);
+    }
+
+    #[test]
+    fn test_parse_ack() {
+        let ack = parse_ack(&ack_from_capture()).expect("failed to parse an acknowledgement");
+
+        assert_eq!(ack, CAPTURE_BINDING);
+    }
+
+    #[test]
+    fn test_ack_and_offer_are_not_interchangeable() {
+        // The exchange only closes on an acknowledgement, so a repeated offer
+        // must not be read as one, and vice versa.
+        assert_eq!(parse_ack(&OFFER), Err(DHCPError::WrongMessageType));
+        assert_eq!(parse(&ack_from_capture()), Err(DHCPError::WrongMessageType));
+    }
+
+    #[test]
+    fn test_ack_is_checked_like_an_offer() {
+        // The identity checks are the same ones, so an acknowledgement for
+        // another exchange is rejected before its contents are read.
+        let mut msg = ack_from_capture();
+        msg[XID][0] ^= 0xff;
+
+        assert_eq!(parse_ack(&msg), Err(DHCPError::XidMismatch));
+
+        let mut msg = ack_from_capture();
+        msg[CHADDR][5] ^= 0xff;
+
+        assert_eq!(parse_ack(&msg), Err(DHCPError::ClientMacMismatch));
+    }
+
+    #[test]
+    fn test_binding_round_trips_through_a_request() {
+        // What we parse out of an offer is what the request puts back on the
+        // wire: the two are the only things tying the exchange together.
+        let offer = parse(&OFFER).expect("failed to parse a captured offer");
+
+        let request = build_request(CLIENT_MAC, CAPTURE_XID, &offer);
+
+        assert_eq!(u32::from_be_slice(&request[XID]), CAPTURE_XID);
         assert_eq!(
-            offer,
-            DHCPOffer {
-                offered_addr: Ipv4Addr::new(10, 0, 2, 15),
-                subnet_mask: Ipv4Addr::new(255, 255, 255, 0),
-                gateway: Ipv4Addr::new(10, 0, 2, 2),
-            }
+            request[FIXED_LEN + 5..FIXED_LEN + 9],
+            offer.client_addr.octets()
+        );
+        assert_eq!(
+            request[FIXED_LEN + 11..FIXED_LEN + 15],
+            offer.server_id.octets()
         );
     }
 
@@ -454,6 +651,7 @@ mod tests {
         // the tag of whatever follows.
         let mut options = vec![OPT_PAD, OPT_PAD];
         options.extend_from_slice(&[53, 1, 2, OPT_PAD]);
+        options.extend_from_slice(&[54, 4, 10, 0, 2, 2, OPT_PAD]);
         options.extend_from_slice(&[1, 4, 255, 255, 255, 0, OPT_PAD]);
         options.extend_from_slice(&[3, 4, 10, 0, 2, 2, 255]);
 
@@ -462,9 +660,11 @@ mod tests {
 
     #[test]
     fn test_offer_skips_unknown_options() {
-        // The server identifier, DNS and lease time options in the capture are
-        // all stepped over by their length.
-        let options = [53, 1, 2, 1, 4, 255, 255, 255, 0, 3, 4, 10, 0, 2, 2, 255];
+        // The DNS and lease time options in the capture are stepped over by
+        // their length rather than read.
+        let options = [
+            53, 1, 2, 54, 4, 10, 0, 2, 2, 1, 4, 255, 255, 255, 0, 3, 4, 10, 0, 2, 2, 255,
+        ];
 
         assert_eq!(parse(&offer_with(&options)), parse(&OFFER));
     }
@@ -481,6 +681,7 @@ mod tests {
     fn test_offer_takes_first_router() {
         let options = [
             53, 1, 2, //
+            54, 4, 10, 0, 2, 2, //
             1, 4, 255, 255, 255, 0, //
             3, 8, 10, 0, 2, 2, 10, 0, 2, 9, // two routers, in preference order
             255,
@@ -598,16 +799,34 @@ mod tests {
 
     #[test]
     fn test_offer_rejects_missing_subnet_mask() {
-        let options = [53, 1, 2, 3, 4, 10, 0, 2, 2, 255];
+        let options = [53, 1, 2, 54, 4, 10, 0, 2, 2, 3, 4, 10, 0, 2, 2, 255];
 
         assert_eq!(parse(&offer_with(&options)), Err(DHCPError::MissingData));
     }
 
     #[test]
     fn test_offer_rejects_missing_router() {
-        let options = [53, 1, 2, 1, 4, 255, 255, 255, 0, 255];
+        let options = [53, 1, 2, 54, 4, 10, 0, 2, 2, 1, 4, 255, 255, 255, 0, 255];
 
         assert_eq!(parse(&offer_with(&options)), Err(DHCPError::MissingData));
+    }
+
+    #[test]
+    fn test_offer_rejects_missing_server_id() {
+        // Without it there is nothing to address the request to, and nothing to
+        // check the acknowledgement against.
+        let options = [53, 1, 2, 1, 4, 255, 255, 255, 0, 3, 4, 10, 0, 2, 2, 255];
+
+        assert_eq!(parse(&offer_with(&options)), Err(DHCPError::MissingData));
+    }
+
+    #[test]
+    fn test_offer_rejects_bad_server_id_length() {
+        let options = [
+            53, 1, 2, 54, 3, 10, 0, 2, 1, 4, 255, 255, 255, 0, 3, 4, 10, 0, 2, 2, 255,
+        ];
+
+        assert_eq!(parse(&offer_with(&options)), Err(DHCPError::InvalidTLV));
     }
 
     #[test]

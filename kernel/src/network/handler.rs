@@ -3,7 +3,7 @@ use crate::{network::device::get_net_driver, println};
 use alloc::borrow::ToOwned;
 use alloc::vec;
 use conc_os_net::arp::{ArpCache, ArpOperation, ArpPacket, Queued};
-use conc_os_net::dhcp::{self, DHCPOffer};
+use conc_os_net::dhcp::{self, DHCPBinding};
 use conc_os_net::ethernet::{EtherType, EthernetFrame, MacAddress};
 use conc_os_net::ipv4::{IPProtocol, Ipv4Error, Ipv4Packet, internet_checksum};
 use conc_os_net::udp::{UDPError, UDPPacket};
@@ -29,7 +29,7 @@ pub fn init_network_interface() {
             gateway: None,
             subnet_mask: None,
             arp: ArpCache::new(),
-            initializing_dhcp_xid: None,
+            dhcp: DHCPState::Idle,
         };
 
         interface.init_dhcp().expect("dhcp initialized");
@@ -46,13 +46,36 @@ pub enum DHCPError {
     AlreadyStarted,
 }
 
+/// How far the DHCP exchange has got. Both stages carry the exchange id, since
+/// every reply that is not answering it belongs to someone else.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DHCPState {
+    /// Nothing in flight: the interface has either not started, or is bound.
+    Idle,
+    /// A discover went out, and we are waiting for a server to offer something.
+    Selecting { xid: u32 },
+    /// An offer was accepted and the request went out. Only the acknowledgement
+    /// of it closes the exchange, so the offer is held until then and nothing
+    /// is configured from it.
+    Requesting { xid: u32, offer: DHCPBinding },
+}
+
+impl DHCPState {
+    fn xid(&self) -> Option<u32> {
+        match self {
+            Self::Idle => None,
+            Self::Selecting { xid } | Self::Requesting { xid, .. } => Some(*xid),
+        }
+    }
+}
+
 pub struct NetworkInterface {
     mac: MacAddress,
     ipv4: Option<Ipv4Addr>,
     gateway: Option<Ipv4Addr>,
     subnet_mask: Option<Ipv4Addr>,
     arp: ArpCache,
-    initializing_dhcp_xid: Option<u32>,
+    dhcp: DHCPState,
 }
 
 impl NetworkInterface {
@@ -223,7 +246,7 @@ impl NetworkInterface {
             || self.ipv4.is_some_and(|my_ip| ipv4_packet.dest == my_ip)
             // A server may answer the discover by unicast to our MAC, at an
             // address we do not hold yet.
-            || (self.ipv4.is_none() && self.initializing_dhcp_xid.is_some());
+            || (self.ipv4.is_none() && self.dhcp.xid().is_some());
 
         if !for_us {
             return;
@@ -290,17 +313,27 @@ impl NetworkInterface {
     }
 
     pub fn init_dhcp(&mut self) -> Result<(), DHCPError> {
-        if self.initializing_dhcp_xid.is_some() {
+        if self.dhcp != DHCPState::Idle {
             return Err(DHCPError::AlreadyStarted);
         }
 
         let xid = u32::from_rand().map_err(DHCPError::RNGError)?;
 
-        let data = dhcp::build_discover(self.mac, xid);
+        self.send_dhcp(&dhcp::build_discover(self.mac, xid))?;
 
+        self.dhcp = DHCPState::Selecting { xid };
+
+        Ok(())
+    }
+
+    /// Broadcasts a DHCP message from the unspecified address.
+    ///
+    /// Everything a client sends before its lease is bound goes out this way:
+    /// it has no address to send from, and no resolved next hop to send to.
+    fn send_dhcp(&self, msg: &[u8]) -> Result<(), DHCPError> {
         let id = u16::from_rand().map_err(DHCPError::RNGError)?;
 
-        let datagram = UDPPacket::new(dhcp::CLIENT_PORT, dhcp::SERVER_PORT, &data)
+        let datagram = UDPPacket::new(dhcp::CLIENT_PORT, dhcp::SERVER_PORT, msg)
             .map_err(DHCPError::UDPError)?;
 
         let source = Ipv4Addr::UNSPECIFIED; // we don't know our IP address right now
@@ -315,39 +348,85 @@ impl NetworkInterface {
 
         self.send_frame(MacAddress::broadcast(), EtherType::IPV4, &pkt.serialize());
 
-        self.initializing_dhcp_xid = Some(xid);
-
         Ok(())
     }
 
     pub fn handle_udp(&mut self, datagram: UDPPacket) {
-        if let Some(xid) = self.initializing_dhcp_xid
-            && datagram.dest_port() == dhcp::CLIENT_PORT
-            && datagram.source_port() == dhcp::SERVER_PORT
+        if datagram.dest_port() == dhcp::CLIENT_PORT && datagram.source_port() == dhcp::SERVER_PORT
         {
-            self.handle_dhcp(datagram, xid);
+            self.handle_dhcp(datagram);
         }
     }
 
-    fn handle_dhcp(&mut self, packet: UDPPacket, xid: u32) {
-        let offer = match DHCPOffer::from_message(packet.data(), xid, self.mac) {
-            Ok(offer) => offer,
-            // Offers are broadcast, so an exchange that is not ours is the
-            // ordinary case and not worth reporting.
-            Err(dhcp::DHCPError::XidMismatch | dhcp::DHCPError::ClientMacMismatch) => return,
-            Err(e) => {
-                println!("ignoring DHCP reply: {e:?}");
-                return;
+    /// Advances the DHCP exchange by one reply.
+    ///
+    /// A server's offer is answered with a request for it, and the request's
+    /// acknowledgement is what binds the address and closes the exchange. Which
+    /// of the two a reply has to be is decided by the state we are in, so an
+    /// acknowledgement that arrives before any request cannot configure this
+    /// interface.
+    fn handle_dhcp(&mut self, packet: UDPPacket) {
+        match self.dhcp {
+            DHCPState::Idle => {}
+            DHCPState::Selecting { xid } => {
+                let Some(offer) = read_reply(DHCPBinding::from_offer(packet.data(), xid, self.mac))
+                else {
+                    return;
+                };
+
+                // The first offer wins: with one server on the link there is
+                // nothing to choose between.
+                if let Err(e) = self.send_dhcp(&dhcp::build_request(self.mac, xid, &offer)) {
+                    println!("failed to send DHCP request: {e:?}");
+                    return;
+                }
+
+                self.dhcp = DHCPState::Requesting { xid, offer };
             }
-        };
+            DHCPState::Requesting { xid, offer } => {
+                let Some(ack) = read_reply(DHCPBinding::from_ack(packet.data(), xid, self.mac))
+                else {
+                    return;
+                };
 
-        self.ipv4 = Some(offer.offered_addr);
-        self.subnet_mask = Some(offer.subnet_mask);
-        self.gateway = Some(offer.gateway);
+                // Only the server whose offer we took can commit it. The others
+                // have released what they set aside for us by now.
+                if ack.server_id != offer.server_id {
+                    println!(
+                        "ignoring DHCP ack from {}: {} is the selected server",
+                        ack.server_id, offer.server_id
+                    );
+                    return;
+                }
 
-        println!(
-            "got ip addr {}, mask {}, gw {}",
-            offer.offered_addr, offer.subnet_mask, offer.gateway
-        );
+                // Configured from the acknowledgement rather than the offer: it
+                // is what the server has actually committed to.
+                self.ipv4 = Some(ack.client_addr);
+                self.subnet_mask = Some(ack.subnet_mask);
+                self.gateway = Some(ack.gateway);
+
+                self.dhcp = DHCPState::Idle;
+
+                println!(
+                    "got ip addr {}, mask {}, gw {}",
+                    ack.client_addr, ack.subnet_mask, ack.gateway
+                );
+            }
+        }
+    }
+}
+
+/// Reports what a reply could not be read as, unless it was simply not ours.
+///
+/// Replies are broadcast, so seeing another client's exchange is the ordinary
+/// case and not worth reporting.
+fn read_reply(result: Result<DHCPBinding, dhcp::DHCPError>) -> Option<DHCPBinding> {
+    match result {
+        Ok(binding) => Some(binding),
+        Err(dhcp::DHCPError::XidMismatch | dhcp::DHCPError::ClientMacMismatch) => None,
+        Err(e) => {
+            println!("ignoring DHCP reply: {e:?}");
+            None
+        }
     }
 }

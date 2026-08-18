@@ -26,7 +26,7 @@ pub enum NetworkEvent {
 pub(crate) fn add_event(evt: NetworkEvent) {
     if let Ok(queue) = NET_EVENTS.try_get() {
         if queue.push(evt).is_err() {
-            println!("WARNING: network queue full; dropping serial input");
+            println!("WARNING: network queue full; dropping network packets");
         } else {
             NET_WAKER.wake();
         }

@@ -106,6 +106,7 @@ fn gather_seed() -> Option<([u8; 32], EntropyMode)> {
     };
 
     let mut seed = [0u8; 32];
+    // flatten flattens the [Option<T>] into [T]
     for mut source in [virtio, rdrand].into_iter().flatten() {
         for (s, b) in seed.iter_mut().zip(source.iter()) {
             *s ^= *b;
@@ -153,7 +154,7 @@ unsafe fn rdrand_bytes_unchecked() -> Option<[u8; 32]> {
         unsafe { core::ptr::write_volatile(&mut word, 0) };
     }
 
-    compiler_fence(Ordering::SeqCst);
+    compiler_fence(Ordering::SeqCst); // guard the last write_volatile and ensure that it's zeroized
     Some(out)
 }
 

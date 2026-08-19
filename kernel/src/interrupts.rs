@@ -2,7 +2,7 @@ use virtio_drivers::transport::InterruptStatus;
 use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame, PageFaultErrorCode};
 
 use crate::{
-    apic::LAPIC,
+    apic,
     network::device::get_net_driver,
     println,
     serial::SERIAL_TTY,
@@ -10,10 +10,16 @@ use crate::{
         network::{NetworkEvent, add_event},
         serial,
     },
+    time,
 };
 use lazy_static::lazy_static;
 
 pub const COM1_VECTOR: u8 = 36;
+/// Kept clear of 32..=55, which `init_apic` hands to the I/O APIC as its
+/// redirection base. The local APIC timer does not route through the I/O APIC,
+/// but the vector space is shared, so an overlap would deliver two unrelated
+/// sources to one handler.
+pub const TIMER_VECTOR: u8 = 0x40;
 pub const VIRTIO_NET_VECTOR: u8 = 0x60;
 
 extern "x86-interrupt" fn breakpoint_handler(stack_frame: InterruptStackFrame) {
@@ -55,11 +61,13 @@ extern "x86-interrupt" fn com1_interrupt_handler(_stack_frame: InterruptStackFra
         serial::add_byte(b);
     }
 
-    if let Some(lapic_mutex) = crate::apic::LAPIC.r#try() {
-        unsafe {
-            lapic_mutex.lock().end_of_interrupt();
-        }
-    }
+    apic::end_of_interrupt();
+}
+
+extern "x86-interrupt" fn timer_interrupt_handler(_stack_frame: InterruptStackFrame) {
+    time::tick();
+
+    apic::end_of_interrupt();
 }
 
 extern "x86-interrupt" fn virtio_irq(_frame: InterruptStackFrame) {
@@ -77,13 +85,7 @@ extern "x86-interrupt" fn virtio_irq(_frame: InterruptStackFrame) {
         add_event(NetworkEvent::ConfigChange);
     }
 
-    unsafe {
-        LAPIC
-            .r#try()
-            .expect("lapic should be init")
-            .lock()
-            .end_of_interrupt()
-    };
+    apic::end_of_interrupt();
 }
 
 lazy_static! {
@@ -99,6 +101,7 @@ lazy_static! {
         idt.general_protection_fault
             .set_handler_fn(gp_fault_handler);
         idt[COM1_VECTOR].set_handler_fn(com1_interrupt_handler);
+        idt[TIMER_VECTOR].set_handler_fn(timer_interrupt_handler);
         idt[VIRTIO_NET_VECTOR].set_handler_fn(virtio_irq);
         idt
     };

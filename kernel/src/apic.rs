@@ -4,7 +4,7 @@ use crate::{
     println,
 };
 use pic8259::ChainedPics;
-use spin::{Mutex, Once};
+use spin::Once;
 use x2apic::ioapic::{IoApic, IrqFlags, RedirectionTableEntry};
 use x86_64::registers::model_specific::Msr;
 
@@ -12,48 +12,81 @@ const IA32_APIC_BASE_MSR: u32 = 0x1B;
 // const X2APIC_ENABLE_BIT: u64 = 1 << 10;
 const GLOBAL_APIC_ENABLE_BIT: u64 = 1 << 11;
 
+/// Physical address of the local APIC register block.
+///
+/// Fixed by the architecture and the same on every core, because each core
+/// sees *its own* registers there. The address therefore never identifies a
+/// particular APIC, only "whichever one belongs to whoever is asking".
+const LAPIC_PHYS_ADDR: u64 = 0xFEE0_0000;
+
 // The standard PIC offsets
 const PIC_1_OFFSET: u8 = 32;
 const PIC_2_OFFSET: u8 = PIC_1_OFFSET + 8;
-pub static LAPIC: Once<Mutex<PureXapic>> = Once::new();
 
-// A thread-safe wrapper for pure MMIO xAPIC operations
-pub struct PureXapic {
-    base_addr: u64,
+// Register offsets within the block, SDM Vol. 3 Table 11-1.
+const REG_LAPIC_ID: u64 = 0x020;
+const REG_EOI: u64 = 0x0B0;
+const REG_SPURIOUS: u64 = 0x0F0;
+
+/// Virtual address the local APIC registers are mapped at, set once by
+/// [`init_apic`].
+///
+/// Deliberately not behind a lock. There is nothing here to serialize: every
+/// access below is a single volatile load or store, none of them a
+/// read-modify-write, and they land in a register block private to the calling
+/// core. A lock would only introduce the possibility of an interrupt handler
+/// spinning on a lock held by the code it interrupted.
+static LAPIC_BASE: Once<u64> = Once::new();
+
+fn base() -> u64 {
+    *LAPIC_BASE.r#try().expect("APIC must be initialized")
 }
 
-impl PureXapic {
-    pub const fn new(base_addr: u64) -> Self {
-        Self { base_addr }
-    }
-
-    pub unsafe fn enable(&self) {
-        // Spurious Interrupt Vector Register is at offset 0x0F0
-        let sivr_ptr = (self.base_addr + 0x0F0) as *mut u32;
-
-        // Bit 8 (0x100) is the Software Enable bit.
-        // We OR it with our chosen spurious vector (e.g., 255 or 0xFF)
-        unsafe { core::ptr::write_volatile(sivr_ptr, 0x100 | 0xFF) };
-    }
-
-    pub unsafe fn end_of_interrupt(&self) {
-        // End of Interrupt (EOI) Register is at offset 0x0B0
-        let eoi_ptr = (self.base_addr + 0x0B0) as *mut u32;
-
-        // Writing 0 signals the end of the interrupt
-        unsafe { core::ptr::write_volatile(eoi_ptr, 0) };
-    }
-
-    pub unsafe fn lapic_id(&self) -> u8 {
-        unsafe {
-            let id_reg = (self.base_addr + 0x20) as *const u32;
-            ((*id_reg >> 24) & 0xff) as u8
-        }
-    }
+/// Reads the local APIC register at `offset`, **on the calling CPU**.
+///
+/// # Safety
+///
+/// `offset` must be the offset of a readable local APIC register. Some
+/// registers in the block are write-only, and reading those is undefined.
+pub unsafe fn read_register(offset: u64) -> u32 {
+    unsafe { ((base() + offset) as *const u32).read_volatile() }
 }
 
-// It's safe to send across threads if we wrap it in a Mutex globally
-unsafe impl Send for PureXapic {}
+/// Writes `value` to the local APIC register at `offset`, **on the calling CPU**.
+///
+/// # Safety
+///
+/// `offset` must be the offset of a writable local APIC register, and `value`
+/// must be meaningful for that register. These registers drive interrupt
+/// delivery, so a wrong store misroutes or silently masks interrupts rather
+/// than failing in any visible way.
+pub unsafe fn write_register(offset: u64, value: u32) {
+    unsafe { ((base() + offset) as *mut u32).write_volatile(value) };
+}
+
+/// Software-enables the local APIC, parking spurious interrupts on vector 0xFF.
+fn enable() {
+    // Bit 8 is the software enable bit; the low byte is the spurious vector.
+    unsafe { write_register(REG_SPURIOUS, 0x100 | 0xFF) };
+}
+
+/// Signals end-of-interrupt to the calling CPU's local APIC.
+///
+/// Every handler for an interrupt delivered through the APIC must call this
+/// exactly once before returning. Skipping it leaves the in-service bit set and
+/// that core stops accepting interrupts at or below the serviced priority.
+pub fn end_of_interrupt() {
+    // The entire protocol is a store of zero; the value written is ignored.
+    unsafe { write_register(REG_EOI, 0) };
+}
+
+/// The calling CPU's local APIC ID.
+///
+/// Reports whichever core executes it. It is not a property of anything
+/// recorded earlier, so a value read on one core says nothing about another.
+pub fn lapic_id() -> u8 {
+    (unsafe { read_register(REG_LAPIC_ID) } >> 24) as u8
+}
 
 pub fn init_apic() {
     let mut apic_msr = Msr::new(IA32_APIC_BASE_MSR);
@@ -68,15 +101,10 @@ pub fn init_apic() {
         legacy_apic.disable(); // Masks all legacy interrupts
     }
 
-    let lapic_addr = 0xFEE0_0000 + get_offset();
-    let lapic = PureXapic::new(lapic_addr);
+    LAPIC_BASE.call_once(|| LAPIC_PHYS_ADDR + get_offset());
 
-    unsafe {
-        lapic.enable();
-        println!("{}", lapic.lapic_id())
-    } // Direct MMIO write, no MSRs!
-
-    LAPIC.call_once(|| Mutex::new(lapic));
+    enable();
+    println!("{}", lapic_id());
 
     let io_apic_info = get_io_apics().first().expect("must have an I/O apic");
 

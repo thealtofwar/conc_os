@@ -15,6 +15,7 @@ pub mod pci;
 pub mod rng;
 pub mod serial;
 pub mod task;
+pub mod time;
 pub mod vga;
 pub mod virtio;
 
@@ -39,6 +40,7 @@ use crate::{
     rng::init_entropy,
     serial::{TTYErr, readline},
     task::{Task, executor::Executor, network::network_task, serial::SerialStream},
+    time::init_timer,
 };
 
 #[panic_handler]
@@ -64,6 +66,9 @@ fn init(boot_info: &'static BootInfo) {
     init_acpi();
     lazy_static::initialize(&crate::serial::SERIAL_TTY);
     init_apic();
+    // Before interrupts are unmasked: calibration polls the PIT, and anything
+    // servicing an IRQ inside that loop would skew the measurement.
+    init_timer();
     init_virtio_net_pci();
     println!("entropy: {:?}", init_entropy());
     x86_64::instructions::interrupts::enable();

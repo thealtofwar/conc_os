@@ -11,10 +11,8 @@ pub struct MacAddress {
 }
 
 impl MacAddress {
-    pub fn new(slice: &[u8]) -> Self {
-        MacAddress {
-            addr: *slice.as_array().expect("invalid length"),
-        }
+    pub fn new(addr: [u8; 6]) -> Self {
+        MacAddress { addr }
     }
 
     pub fn broadcast() -> Self {
@@ -73,7 +71,7 @@ impl<'a> EthernetFrame<'a> {
             0x0800 => Ok(Self::Ipv4(
                 Ipv4Packet::from_packet(&packet[14..]).map_err(EthernetError::Ipv4Err)?,
             )),
-            _ => Ok(Self::Unknown(ethertype, &packet)),
+            _ => Ok(Self::Unknown(ethertype, packet)),
         }
     }
 }
@@ -108,9 +106,9 @@ mod tests {
             hardware_len: 6,
             proto_len: 4,
             operation: ArpOperation::Request,
-            sender_mac: MacAddress::new(&SRC_MAC),
+            sender_mac: MacAddress::new(SRC_MAC),
             sender_addr: Ipv4Addr::new(192, 168, 1, 10),
-            target_mac: MacAddress::new(&[0x00; 6]),
+            target_mac: MacAddress::new([0x00; 6]),
             target_addr: Ipv4Addr::new(192, 168, 1, 20),
         }
     }
@@ -232,5 +230,11 @@ mod tests {
                 "a {len} byte frame is shorter than the Ethernet header"
             );
         }
+    }
+
+    #[test]
+    fn test_mac_addr_display() {
+        let addr = MacAddress::new([0x01, 0x02, 0x03, 0x04, 0x05, 0x06]);
+        assert_eq!(format!("{addr}"), "01:02:03:04:05:06");
     }
 }

@@ -205,11 +205,11 @@ impl ArpPacket {
             hardware_len,
             proto_len,
             operation,
-            sender_mac: MacAddress::new(&packet_data[8..14]),
+            sender_mac: MacAddress::new(packet_data[8..14].try_into().expect("invalid length")),
             sender_addr: Ipv4Addr::from_octets(
                 *(packet_data[14..18].as_array().expect("invalid length")),
             ),
-            target_mac: MacAddress::new(&packet_data[18..24]),
+            target_mac: MacAddress::new(packet_data[18..24].try_into().expect("invalid length")),
             target_addr: Ipv4Addr::from_octets(
                 *(packet_data[24..28].as_array().expect("invalid length")),
             ),
@@ -222,7 +222,7 @@ mod tests {
     use super::*;
 
     fn mac(last: u8) -> MacAddress {
-        MacAddress::new(&[0x02, 0x00, 0x00, 0x00, 0x00, last])
+        MacAddress::new([0x02, 0x00, 0x00, 0x00, 0x00, last])
     }
 
     fn ip(last: u8) -> Ipv4Addr {
@@ -453,9 +453,9 @@ mod tests {
             hardware_len: 6,
             proto_len: 4,
             operation: ArpOperation::try_from(1).unwrap(), // Assuming Request = 1
-            sender_mac: MacAddress::new(&[0x11, 0x22, 0x33, 0x44, 0x55, 0x66]),
+            sender_mac: MacAddress::new([0x11, 0x22, 0x33, 0x44, 0x55, 0x66]),
             sender_addr: Ipv4Addr::from_octets([192, 168, 1, 10]),
-            target_mac: MacAddress::new(&[0x00, 0x00, 0x00, 0x00, 0x00, 0x00]),
+            target_mac: MacAddress::new([0x00, 0x00, 0x00, 0x00, 0x00, 0x00]),
             target_addr: Ipv4Addr::from_octets([192, 168, 1, 20]),
         };
 

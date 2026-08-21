@@ -83,8 +83,8 @@ fn process_rx(packet: &[u8]) {
         return;
     }
 
-    let dst = MacAddress::new(&packet[0..6]);
-    let src = MacAddress::new(&packet[6..12]);
+    let dst = MacAddress::new(packet[0..6].try_into().expect("invalid length"));
+    let src = MacAddress::new(packet[6..12].try_into().expect("invalid length"));
     let ethertype = u16::from_be_bytes([packet[12], packet[13]]);
 
     if ethertype == 0x0806

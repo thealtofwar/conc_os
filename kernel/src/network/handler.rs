@@ -135,7 +135,7 @@ impl NetworkInterface {
             sender_mac: self.mac,
             sender_addr: self.ipv4.unwrap(),
 
-            target_mac: MacAddress::new(&[0, 0, 0, 0, 0, 0]),
+            target_mac: MacAddress::new([0, 0, 0, 0, 0, 0]),
             target_addr,
         };
 

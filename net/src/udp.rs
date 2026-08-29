@@ -25,6 +25,8 @@ pub struct UDPPacket<'a> {
     data: &'a [u8],
 }
 
+// is_empty is sort of silly to implement on a udppacket because checking for empty is not useful
+#[allow(clippy::len_without_is_empty)]
 impl<'a> UDPPacket<'a> {
     pub fn new(source_port: u16, dest_port: u16, data: &'a [u8]) -> Result<Self, UDPError> {
         Ok(Self {

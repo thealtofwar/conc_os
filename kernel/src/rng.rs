@@ -139,7 +139,7 @@ fn has_rdrand() -> bool {
 unsafe fn rdrand_bytes_unchecked() -> Option<[u8; 32]> {
     let mut out = [0u8; 32];
 
-    for chunk in out.chunks_exact_mut(8) {
+    for chunk in out.as_chunks_mut::<8>().0 {
         let mut word = 0u64;
 
         let ok = (0..10).any(|_| core::arch::x86_64::_rdrand64_step(&mut word) == 1);

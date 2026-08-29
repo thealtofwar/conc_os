@@ -30,6 +30,7 @@ pub unsafe fn active_level_4_table(boot_info: &BootInfo) -> &'static mut PageTab
 
 /// Initialize a new OffsetPageTable.
 ///
+/// # Safety
 /// This function is unsafe because the caller must guarantee that the
 /// boot_info is correct. Also, this function must be only called once
 /// to avoid aliasing `&mut` references (which is undefined behavior).

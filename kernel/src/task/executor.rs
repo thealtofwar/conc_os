@@ -101,6 +101,8 @@ impl Executor {
 
         if self.task_queue.is_empty() {
             x86_64::instructions::interrupts::enable_and_hlt();
+        } else {
+            x86_64::instructions::interrupts::enable();
         }
     }
 }

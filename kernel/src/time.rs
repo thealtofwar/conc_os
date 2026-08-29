@@ -1,7 +1,7 @@
 use core::sync::atomic::{AtomicU64, Ordering};
 use x86_64::instructions::port::Port;
 
-use crate::{apic, interrupts::TIMER_VECTOR, println};
+use crate::{apic, interrupts::TIMER_VECTOR, println, task};
 
 /// Timer ticks per second. 1 kHz gives the millisecond resolution TCP wants
 /// without the tick itself costing anything measurable.
@@ -41,6 +41,7 @@ pub fn ticks() -> u64 {
 /// Called from the timer interrupt. Nothing else may call this.
 pub(crate) fn tick() {
     TICKS.fetch_add(1, Ordering::Relaxed);
+    task::time::expire(now_ms());
 }
 
 /// Measures the LAPIC timer's input frequency against PIT channel 2.

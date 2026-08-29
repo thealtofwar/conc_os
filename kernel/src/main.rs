@@ -33,13 +33,10 @@ use crate::{
     },
     apic::init_apic,
     memory::{MAPPER, OFFSET},
-    network::{
-        device::{get_net_driver, init_virtio_net_pci},
-        handler::get_network_interface,
-    },
+    network::device::{get_net_driver, init_virtio_net_pci},
     rng::init_entropy,
     serial::{TTYErr, readline},
-    task::{Task, executor::Executor, network::network_task, serial::SerialStream},
+    task::{Task, executor::Executor, network::network_task, serial::SerialStream, time::TimeTask},
     time::init_timer,
 };
 
@@ -82,6 +79,7 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
     let mut executor = Executor::new();
     executor.spawn(Task::new(handle_serial()));
     executor.spawn(Task::new(network_task()));
+    executor.spawn(Task::new(time_task()));
     executor.run();
 }
 
@@ -98,5 +96,12 @@ async fn handle_serial() {
             Err(TTYErr::BufferTooSmall) => serial::print(format_args!("line too long")),
             Err(TTYErr::SerialErr) => serial::print(format_args!("serial err")),
         }
+    }
+}
+
+async fn time_task() {
+    loop {
+        println!("1s passed, time is {}", time::now_ms());
+        TimeTask::new(1000).await;
     }
 }

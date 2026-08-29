@@ -1,6 +1,7 @@
 pub mod executor;
 pub mod network;
 pub mod serial;
+pub mod time;
 use core::{
     pin::Pin,
     sync::atomic::{AtomicU64, Ordering},

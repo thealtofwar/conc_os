@@ -13,6 +13,7 @@ pub fn get_offset() -> &'static u64 {
 }
 /// Returns a mutable reference to the active level 4 table from
 ///
+/// # Safety
 /// This function is unsafe because the caller must guarantee that the
 /// boot_info is correct. Also, this function must be only called once
 /// to avoid aliasing `&mut` references (which is undefined behavior).

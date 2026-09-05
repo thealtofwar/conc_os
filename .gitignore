@@ -1,0 +1,5 @@
+/target
+/esp
+/disk.img
+/images
+*.log

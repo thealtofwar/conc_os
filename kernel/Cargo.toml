@@ -1,0 +1,13 @@
+[package]
+name = "conc_os"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "conc_os"
+path = "src/main.rs"
+test = false
+bench = false
+
+[dependencies]
+smoltcp = { version = "0.14.0", default-features = false, features = ["alloc", "async", "medium-ip", "proto-ipv4", "socket-tcp", "socket-tcp-reno"] }

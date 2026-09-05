@@ -1,0 +1,7 @@
+[alias]
+xtask = "run --quiet --package xtask --"
+
+# Guest images: statically linked, non-PIE ELF at a fixed address so the
+# hypervisor's loader can copy segments straight into guest memory.
+[target.x86_64-unknown-none]
+rustflags = ["-C", "relocation-model=static", "-C", "code-model=small"]
